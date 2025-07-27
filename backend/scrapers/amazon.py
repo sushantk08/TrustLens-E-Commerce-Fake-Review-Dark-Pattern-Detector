@@ -10,18 +10,18 @@ from .base import BaseScraper
 
 class AmazonScraper(BaseScraper):
     """
-    Scrapes Amazon product metadata and customer reviews.
+    Scraper for Amazon product information and publicly visible reviews.
 
     Supports:
     - Normal Amazon product URLs
-    - Amazon short URLs such as /d/XXXXXXXXXX
-    - Product pages
-    - Paginated review pages
+    - Amazon short URLs such as https://amzn.in/d/XXXXXXXX
+    - Amazon India product pages
+    - Amazon review cards embedded on product pages
     """
 
-    # ------------------------------------------------------------------
-    # General helpers
-    # ------------------------------------------------------------------
+    # ==============================================================
+    # GENERAL HELPERS
+    # ==============================================================
 
     def _clean_text(self, value: str) -> str:
         """
@@ -36,10 +36,38 @@ class AmazonScraper(BaseScraper):
             str(value)
         ).strip()
 
-    def _is_blocked_page(self, soup: BeautifulSoup) -> bool:
+    def _is_amazon_domain(self, host: str) -> bool:
         """
-        Detect common Amazon CAPTCHA, robot-check, login and
-        blocked pages.
+        Check whether hostname belongs to Amazon or amzn.in.
+        """
+
+        host = (
+            host or ""
+        ).lower().strip()
+
+        if not host:
+            return False
+
+        if (
+            host == "amzn.in"
+            or host.endswith(".amzn.in")
+        ):
+            return True
+
+        if re.match(
+            r"^(?:[\w-]+\.)*amazon\.[a-z.]+$",
+            host
+        ):
+            return True
+
+        return False
+
+    def _is_blocked_page(
+        self,
+        soup: BeautifulSoup
+    ) -> bool:
+        """
+        Detect common Amazon CAPTCHA or blocked pages.
         """
 
         title = self._clean_text(
@@ -65,7 +93,6 @@ class AmazonScraper(BaseScraper):
             "robot check",
             "captcha",
             "automated access",
-            "sorry, something went wrong",
             "access denied",
         ]
 
@@ -85,19 +112,22 @@ class AmazonScraper(BaseScraper):
 
         return False
 
-    # ------------------------------------------------------------------
-    # Amazon URL / ASIN handling
-    # ------------------------------------------------------------------
+    # ==============================================================
+    # AMAZON URL / ASIN
+    # ==============================================================
 
-    def extract_asin(self, url: str) -> str:
+    def extract_asin(
+        self,
+        url: str
+    ) -> str:
         """
-        Extract Amazon ASIN from common Amazon URLs.
+        Extract Amazon ASIN from a URL.
 
-        Supports:
-        /dp/XXXXXXXXXX
-        /gp/product/XXXXXXXXXX
-        /product-reviews/XXXXXXXXXX
-        ?asin=XXXXXXXXXX
+        Supported:
+            /dp/B0XXXXXXXX
+            /gp/product/B0XXXXXXXX
+            /product-reviews/B0XXXXXXXX
+            ?asin=B0XXXXXXXX
         """
 
         if not url:
@@ -111,6 +141,7 @@ class AmazonScraper(BaseScraper):
         ]
 
         for pattern in patterns:
+
             match = re.search(
                 pattern,
                 url,
@@ -127,11 +158,9 @@ class AmazonScraper(BaseScraper):
         soup: BeautifulSoup
     ) -> str:
         """
-        Try to extract ASIN from the product page itself when the URL
-        does not contain it.
+        Extract ASIN directly from page HTML.
         """
 
-        # Common Amazon hidden input.
         selectors = [
             "#ASIN",
             "input[name='ASIN']",
@@ -139,19 +168,29 @@ class AmazonScraper(BaseScraper):
         ]
 
         for selector in selectors:
-            element = soup.select_one(selector)
 
-            if element:
-                value = element.get("value", "").strip()
+            element = soup.select_one(
+                selector
+            )
 
-                if re.fullmatch(
-                    r"[A-Z0-9]{10}",
-                    value,
-                    re.IGNORECASE
-                ):
-                    return value.upper()
+            if not element:
+                continue
 
-        # Sometimes the ASIN appears in page HTML.
+            value = (
+                element.get(
+                    "value",
+                    ""
+                )
+                or ""
+            ).strip()
+
+            if re.fullmatch(
+                r"[A-Z0-9]{10}",
+                value,
+                re.IGNORECASE
+            ):
+                return value.upper()
+
         html = str(soup)
 
         patterns = [
@@ -161,6 +200,7 @@ class AmazonScraper(BaseScraper):
         ]
 
         for pattern in patterns:
+
             match = re.search(
                 pattern,
                 html,
@@ -177,12 +217,15 @@ class AmazonScraper(BaseScraper):
         url: str
     ) -> tuple[str, str]:
         """
-        Open the supplied Amazon URL with Selenium.
+        Resolve normal Amazon URLs and Amazon short URLs.
 
-        This is important for short URLs such as:
-        https://amazon.in/d/0cEIiuS3
+        Example:
 
-        Selenium follows Amazon's redirect and exposes the final URL.
+        https://amzn.in/d/XXXXXXXX
+                    ↓
+        https://www.amazon.in/dp/B0XXXXXXXX
+                    ↓
+        ASIN
         """
 
         if not url:
@@ -190,51 +233,98 @@ class AmazonScraper(BaseScraper):
                 "Amazon URL cannot be empty."
             )
 
-        parsed = urlparse(url)
+        parsed = urlparse(
+            url
+        )
 
-        if "amazon" not in parsed.netloc.lower():
+        host = parsed.netloc.lower()
+
+        if not self._is_amazon_domain(
+            host
+        ):
             raise ValueError(
                 "The supplied URL does not appear to be an Amazon URL."
             )
 
+        # ----------------------------------------------------------
+        # Open URL.
+        # ----------------------------------------------------------
         try:
-            self.driver.get(url)
 
-            # Give Amazon time to redirect.
-            time.sleep(3)
+            self.driver.get(
+                url
+            )
+
+            time.sleep(4)
 
         except Exception as exc:
+
             raise RuntimeError(
                 f"Failed to open Amazon URL: {exc}"
             ) from exc
 
-        final_url = self.driver.current_url or url
+        # ----------------------------------------------------------
+        # Get redirected URL.
+        # ----------------------------------------------------------
+        final_url = (
+            self.driver.current_url
+            or url
+        )
 
-        asin = self.extract_asin(final_url)
+        # ----------------------------------------------------------
+        # Try ASIN from final URL.
+        # ----------------------------------------------------------
+        asin = self.extract_asin(
+            final_url
+        )
 
-        # If ASIN is still not available from the URL, inspect the page.
+        # ----------------------------------------------------------
+        # Try ASIN from original URL.
+        # ----------------------------------------------------------
         if not asin:
-            soup = BeautifulSoup(
-                self.driver.page_source,
-                "html.parser"
+
+            asin = self.extract_asin(
+                url
             )
+
+        # ----------------------------------------------------------
+        # Try ASIN from page HTML.
+        # ----------------------------------------------------------
+        soup = BeautifulSoup(
+            self.driver.page_source,
+            "html.parser"
+        )
+
+        if not asin:
 
             asin = self._extract_asin_from_page(
                 soup
             )
 
+        # ----------------------------------------------------------
+        # Detect blocked page.
+        # ----------------------------------------------------------
+        if self._is_blocked_page(
+            soup
+        ):
+            raise RuntimeError(
+                "Amazon returned a CAPTCHA or blocked page."
+            )
+
         if not asin:
+
             raise ValueError(
                 "Could not find an Amazon ASIN. "
-                "The URL may be invalid, Amazon may have blocked the "
-                "request, or the page may not be a product page."
+                "The URL may be invalid, Amazon may have blocked "
+                "the request, or the short URL did not resolve "
+                "to a product page."
             )
 
         return final_url, asin
 
-    # ------------------------------------------------------------------
-    # Price handling
-    # ------------------------------------------------------------------
+    # ==============================================================
+    # PRICE
+    # ==============================================================
 
     def get_clean_price(
         self,
@@ -242,11 +332,6 @@ class AmazonScraper(BaseScraper):
     ) -> float:
         """
         Convert an Amazon price string to float.
-
-        Examples:
-        ₹1,499.00 -> 1499.0
-        $29.99 -> 29.99
-        1,299 -> 1299.0
         """
 
         if not price_str:
@@ -263,8 +348,13 @@ class AmazonScraper(BaseScraper):
         )
 
         try:
-            return float(value)
-        except (ValueError, TypeError):
+            return float(
+                value
+            )
+        except (
+            ValueError,
+            TypeError
+        ):
             return 0.0
 
     def _extract_price_from_selectors(
@@ -273,7 +363,7 @@ class AmazonScraper(BaseScraper):
         selectors: list
     ) -> float:
         """
-        Try multiple Amazon price selectors.
+        Try multiple price selectors.
         """
 
         for selector in selectors:
@@ -308,7 +398,7 @@ class AmazonScraper(BaseScraper):
         soup: BeautifulSoup
     ) -> float:
         """
-        Extract price when Amazon splits whole/fraction values.
+        Extract price when whole and fraction are separate.
         """
 
         whole_element = soup.select_one(
@@ -356,10 +446,13 @@ class AmazonScraper(BaseScraper):
             return 0.0
 
         try:
+
             return float(
                 f"{whole}.{fraction[:2] or '00'}"
             )
+
         except ValueError:
+
             return 0.0
 
     def _extract_original_price(
@@ -368,7 +461,7 @@ class AmazonScraper(BaseScraper):
         current_price: float
     ) -> float:
         """
-        Extract original/list price where available.
+        Extract original/list price.
         """
 
         selectors = [
@@ -403,15 +496,21 @@ class AmazonScraper(BaseScraper):
                 )
 
                 if price > 0:
-                    prices.append(price)
+                    prices.append(
+                        price
+                    )
 
         unique_prices = []
 
         for price in prices:
+
             if price not in unique_prices:
-                unique_prices.append(price)
+                unique_prices.append(
+                    price
+                )
 
         for price in unique_prices:
+
             if (
                 current_price > 0
                 and price > current_price
@@ -420,16 +519,16 @@ class AmazonScraper(BaseScraper):
 
         return current_price
 
-    # ------------------------------------------------------------------
-    # Product metadata
-    # ------------------------------------------------------------------
+    # ==============================================================
+    # PRODUCT INFORMATION
+    # ==============================================================
 
     def _extract_product_rating(
         self,
         soup: BeautifulSoup
     ):
         """
-        Extract overall Amazon product rating.
+        Extract overall product rating.
         """
 
         selectors = [
@@ -476,23 +575,31 @@ class AmazonScraper(BaseScraper):
                     )
 
                     if not match:
+
                         match = re.search(
                             r"([0-5](?:\.\d+)?)",
                             value
                         )
 
-                    if match:
+                    if not match:
+                        continue
 
-                        try:
-                            rating = float(
-                                match.group(1)
-                            )
+                    try:
 
-                            if 0.0 <= rating <= 5.0:
-                                return rating
+                        rating = float(
+                            match.group(1)
+                        )
 
-                        except ValueError:
-                            continue
+                        if (
+                            0.0
+                            <= rating
+                            <= 5.0
+                        ):
+                            return rating
+
+                    except ValueError:
+
+                        continue
 
         return None
 
@@ -529,16 +636,19 @@ class AmazonScraper(BaseScraper):
                     text
                 )
 
-                if match:
+                if not match:
+                    continue
 
-                    try:
-                        return int(
-                            match.group(1)
-                            .replace(",", "")
-                        )
+                try:
 
-                    except ValueError:
-                        continue
+                    return int(
+                        match.group(1)
+                        .replace(",", "")
+                    )
+
+                except ValueError:
+
+                    continue
 
         return 0
 
@@ -599,24 +709,25 @@ class AmazonScraper(BaseScraper):
         url: str
     ) -> dict:
         """
-        Scrape Amazon product information.
-
-        Handles both regular product links and short links.
+        Scrape Amazon product details.
         """
 
-        # --------------------------------------------------------------
-        # Resolve short URL and identify ASIN.
-        # --------------------------------------------------------------
-        final_url, asin = self._resolve_amazon_url(
-            url
+        final_url, asin = (
+            self._resolve_amazon_url(
+                url
+            )
         )
 
-        # The driver is already on the final URL, but reload once
-        # to make sure the product page is fully loaded.
         try:
+
             if self.driver.current_url != final_url:
-                self.driver.get(final_url)
+
+                self.driver.get(
+                    final_url
+                )
+
                 time.sleep(3)
+
         except Exception:
             pass
 
@@ -625,15 +736,17 @@ class AmazonScraper(BaseScraper):
             "html.parser"
         )
 
-        if self._is_blocked_page(soup):
+        if self._is_blocked_page(
+            soup
+        ):
             raise RuntimeError(
                 "Amazon returned a CAPTCHA or blocked page. "
                 "Product data could not be scraped."
             )
 
-        # --------------------------------------------------------------
+        # ----------------------------------------------------------
         # Product title
-        # --------------------------------------------------------------
+        # ----------------------------------------------------------
         title = ""
 
         title_element = soup.select_one(
@@ -641,6 +754,7 @@ class AmazonScraper(BaseScraper):
         )
 
         if title_element:
+
             title = self._clean_text(
                 title_element.get_text(
                     " ",
@@ -648,9 +762,9 @@ class AmazonScraper(BaseScraper):
                 )
             )
 
-        # --------------------------------------------------------------
+        # ----------------------------------------------------------
         # Current price
-        # --------------------------------------------------------------
+        # ----------------------------------------------------------
         current_price_selectors = [
             "#corePriceDisplay_desktop_feature_div "
             ".priceToPay .a-offscreen",
@@ -671,14 +785,22 @@ class AmazonScraper(BaseScraper):
             ".a-price .a-offscreen",
 
             ".priceToPay .a-offscreen",
+
             ".apexPriceToPay .a-offscreen",
-            ".a-price[data-a-color='price'] .a-offscreen",
+
+            ".a-price[data-a-color='price'] "
+            ".a-offscreen",
+
             ".a-price .a-offscreen",
 
             "#newBuyBoxPrice",
+
             "#price_inside_buybox",
+
             "#priceblock_ourprice",
+
             "#priceblock_dealprice",
+
             "#priceblock_saleprice",
         ]
 
@@ -690,15 +812,16 @@ class AmazonScraper(BaseScraper):
         )
 
         if current_price == 0.0:
+
             current_price = (
                 self._extract_price_from_fraction_parts(
                     soup
                 )
             )
 
-        # --------------------------------------------------------------
+        # ----------------------------------------------------------
         # Original price
-        # --------------------------------------------------------------
+        # ----------------------------------------------------------
         original_price = (
             self._extract_original_price(
                 soup,
@@ -706,25 +829,31 @@ class AmazonScraper(BaseScraper):
             )
         )
 
-        # --------------------------------------------------------------
+        # ----------------------------------------------------------
         # Rating
-        # --------------------------------------------------------------
-        rating = self._extract_product_rating(
-            soup
+        # ----------------------------------------------------------
+        rating = (
+            self._extract_product_rating(
+                soup
+            )
         )
 
-        # --------------------------------------------------------------
+        # ----------------------------------------------------------
         # Review count
-        # --------------------------------------------------------------
-        review_count = self._extract_review_count(
-            soup
+        # ----------------------------------------------------------
+        review_count = (
+            self._extract_review_count(
+                soup
+            )
         )
 
-        # --------------------------------------------------------------
+        # ----------------------------------------------------------
         # Image
-        # --------------------------------------------------------------
-        image_url = self._extract_image_url(
-            soup
+        # ----------------------------------------------------------
+        image_url = (
+            self._extract_image_url(
+                soup
+            )
         )
 
         return {
@@ -737,19 +866,19 @@ class AmazonScraper(BaseScraper):
             "asin": asin,
         }
 
-    # ------------------------------------------------------------------
-    # Review handling
-    # ------------------------------------------------------------------
+    # ==============================================================
+    # REVIEW DATE
+    # ==============================================================
 
     def parse_review_date(
         self,
         date_str: str
     ):
         """
-        Parse Amazon review date.
+        Parse Amazon review dates.
 
         Example:
-        Reviewed in India on 15 August 2024
+            Reviewed in India on 4 September 2026
         """
 
         if not date_str:
@@ -772,63 +901,19 @@ class AmazonScraper(BaseScraper):
         )
 
         try:
+
             return date_parser.parse(
                 target,
                 fuzzy=True
             ).date()
 
         except Exception:
+
             return None
 
-    def _extract_verified_purchase(
-        self,
-        card
-    ) -> bool:
-        """
-        Detect Amazon Verified Purchase badge.
-        """
-
-        selectors = [
-            "span[data-hook='avp-badge']",
-            "span.a-color-state",
-        ]
-
-        for selector in selectors:
-
-            elements = card.select(
-                selector
-            )
-
-            for element in elements:
-
-                text = self._clean_text(
-                    element.get_text(
-                        " ",
-                        strip=True
-                    )
-                )
-
-                if re.search(
-                    r"Verified Purchase",
-                    text,
-                    re.IGNORECASE
-                ):
-                    return True
-
-        card_text = self._clean_text(
-            card.get_text(
-                " ",
-                strip=True
-            )
-        )
-
-        return bool(
-            re.search(
-                r"\bVerified Purchase\b",
-                card_text,
-                re.IGNORECASE
-            )
-        )
+    # ==============================================================
+    # REVIEW HELPERS
+    # ==============================================================
 
     def _extract_review_cards(
         self,
@@ -836,6 +921,9 @@ class AmazonScraper(BaseScraper):
     ):
         """
         Find Amazon review cards.
+
+        The current Amazon page exposes eight review containers
+        through data-hook="review".
         """
 
         selectors = [
@@ -846,6 +934,7 @@ class AmazonScraper(BaseScraper):
         cards = []
 
         for selector in selectors:
+
             cards.extend(
                 soup.select(
                     selector
@@ -871,12 +960,52 @@ class AmazonScraper(BaseScraper):
 
         return unique_cards
 
+    def _extract_reviewer_name(
+        self,
+        card
+    ) -> str:
+        """
+        Extract reviewer name.
+
+        Current Amazon structure:
+        span.a-profile-name
+        """
+
+        selectors = [
+            "span.a-profile-name",
+            ".a-profile-name",
+        ]
+
+        for selector in selectors:
+
+            element = card.select_one(
+                selector
+            )
+
+            if not element:
+                continue
+
+            name = self._clean_text(
+                element.get_text(
+                    " ",
+                    strip=True
+                )
+            )
+
+            if name:
+                return name[:255]
+
+        return "Amazon Customer"
+
     def _extract_review_rating(
         self,
         card
     ) -> float:
         """
-        Extract actual review star rating.
+        Extract actual review rating.
+
+        Current Amazon structure:
+        i[data-hook="review-star-rating"]
         """
 
         selectors = [
@@ -901,31 +1030,60 @@ class AmazonScraper(BaseScraper):
 
             for element in elements:
 
-                text = self._clean_text(
-                    element.get_text(
-                        " ",
-                        strip=True
+                values = [
+                    self._clean_text(
+                        element.get_text(
+                            " ",
+                            strip=True
+                        )
+                    ),
+                    element.get(
+                        "title",
+                        ""
+                    ),
+                    element.get(
+                        "aria-label",
+                        ""
+                    ),
+                ]
+
+                for value in values:
+
+                    if not value:
+                        continue
+
+                    match = re.search(
+                        r"([1-5](?:\.\d+)?)"
+                        r"\s+out of\s+5",
+                        value,
+                        re.IGNORECASE
                     )
-                )
 
-                match = re.search(
-                    r"([1-5](?:\.\d+)?)"
-                    r"\s+out of\s+5",
-                    text,
-                    re.IGNORECASE
-                )
+                    if not match:
 
-                if match:
+                        match = re.search(
+                            r"([1-5](?:\.\d+)?)",
+                            value
+                        )
+
+                    if not match:
+                        continue
 
                     try:
+
                         rating = float(
                             match.group(1)
                         )
 
-                        if 1.0 <= rating <= 5.0:
+                        if (
+                            1.0
+                            <= rating
+                            <= 5.0
+                        ):
                             return rating
 
                     except ValueError:
+
                         continue
 
         return 0.0
@@ -935,13 +1093,19 @@ class AmazonScraper(BaseScraper):
         card
     ) -> str:
         """
-        Extract review title.
+        Extract actual Amazon review title.
+
+        Current Amazon structure:
+        data-hook="reviewTitle"
+
+        Amazon sometimes displays a generic "Review" heading
+        when there is no meaningful review title. In that case
+        we return an empty string.
         """
 
         selectors = [
-            "a[data-hook='review-title'] span",
-            "span[data-hook='review-title'] span",
-            "[data-hook='review-title']",
+            "[data-hook='reviewTitle']",
+            "h5[data-hook='reviewTitle']",
         ]
 
         for selector in selectors:
@@ -950,17 +1114,24 @@ class AmazonScraper(BaseScraper):
                 selector
             )
 
-            if element:
+            if not element:
+                continue
 
-                title = self._clean_text(
-                    element.get_text(
-                        " ",
-                        strip=True
-                    )
+            title = self._clean_text(
+                element.get_text(
+                    " ",
+                    strip=True
                 )
+            )
 
-                if title:
-                    return title
+            if not title:
+                continue
+
+            # "Review" is a generic label, not a real review title.
+            if title.strip().lower() == "review":
+                return ""
+
+            return title[:500]
 
         return ""
 
@@ -969,12 +1140,160 @@ class AmazonScraper(BaseScraper):
         card
     ) -> str:
         """
-        Extract review body.
+        Extract the actual review body.
+
+        Current Amazon structure:
+
+        data-hook="reviewRichContentContainer"
+            -> div.a-cardui-body
+                -> actual review text
+
+        This avoids including:
+        - Brief content visible...
+        - Full content visible...
+        - Read more
+        - Read less
+        - Helpful
+        - Report
+        """
+
+        # ----------------------------------------------------------
+        # Current Amazon structure.
+        # ----------------------------------------------------------
+        rich_container = card.select_one(
+            "[data-hook='reviewRichContentContainer']"
+        )
+
+        if rich_container:
+
+            body = rich_container.select_one(
+                ".a-cardui-body"
+            )
+
+            if body:
+
+                text = self._clean_text(
+                    body.get_text(
+                        " ",
+                        strip=True
+                    )
+                )
+
+                if text:
+                    return self._clean_review_body(
+                        text
+                    )
+
+            # Fallback to rich container itself.
+            text = self._clean_text(
+                rich_container.get_text(
+                    " ",
+                    strip=True
+                )
+            )
+
+            if text:
+                return self._clean_review_body(
+                    text
+                )
+
+        # ----------------------------------------------------------
+        # Fallback selectors for older Amazon layouts.
+        # ----------------------------------------------------------
+        fallback_selectors = [
+            "span[data-hook='review-body']",
+            "div[data-hook='review-body']",
+            "[data-hook='reviewText']",
+        ]
+
+        for selector in fallback_selectors:
+
+            element = card.select_one(
+                selector
+            )
+
+            if not element:
+                continue
+
+            body = element.select_one(
+                ".a-cardui-body"
+            )
+
+            source = (
+                body
+                if body
+                else element
+            )
+
+            text = self._clean_text(
+                source.get_text(
+                    " ",
+                    strip=True
+                )
+            )
+
+            if text:
+                return self._clean_review_body(
+                    text
+                )
+
+        return ""
+
+    def _clean_review_body(
+        self,
+        text: str
+    ) -> str:
+        """
+        Remove Amazon UI text from the review body.
+        """
+
+        if not text:
+            return ""
+
+        # Remove Amazon's dynamic teaser messages.
+        boilerplate_patterns = [
+            r"Brief content visible, "
+            r"double tap to read full content\.",
+
+            r"Full content visible, "
+            r"double tap to read brief content\.",
+
+            r"\bRead more\b",
+
+            r"\bRead less\b",
+        ]
+
+        cleaned = text
+
+        for pattern in boilerplate_patterns:
+
+            cleaned = re.sub(
+                pattern,
+                "",
+                cleaned,
+                flags=re.IGNORECASE
+            )
+
+        cleaned = self._clean_text(
+            cleaned
+        )
+
+        return cleaned
+
+    def _extract_review_date(
+        self,
+        card
+    ):
+        """
+        Extract review date.
+
+        Current Amazon structure:
+        span[data-hook="review-date"]
         """
 
         selectors = [
-            "span[data-hook='review-body']",
-            "div[data-hook='review-body']",
+            "span[data-hook='review-date']",
+            "[data-hook='review-date']",
         ]
 
         for selector in selectors:
@@ -983,7 +1302,48 @@ class AmazonScraper(BaseScraper):
                 selector
             )
 
-            if element:
+            if not element:
+                continue
+
+            date_text = self._clean_text(
+                element.get_text(
+                    " ",
+                    strip=True
+                )
+            )
+
+            if date_text:
+
+                return self.parse_review_date(
+                    date_text
+                )
+
+        return None
+
+    def _extract_verified_purchase(
+        self,
+        card
+    ) -> bool:
+        """
+        Detect Amazon Verified Purchase.
+
+        Current Amazon structure:
+        span[data-hook="avp-badge"]
+        """
+
+        selectors = [
+            "span[data-hook='avp-badge']",
+            "[data-hook='avp-badge']",
+            "[data-hook='review-badges']",
+        ]
+
+        for selector in selectors:
+
+            elements = card.select(
+                selector
+            )
+
+            for element in elements:
 
                 text = self._clean_text(
                     element.get_text(
@@ -992,66 +1352,32 @@ class AmazonScraper(BaseScraper):
                     )
                 )
 
-                if text:
-                    return text
+                if re.search(
+                    r"Verified Purchase",
+                    text,
+                    re.IGNORECASE
+                ):
+                    return True
 
-        return ""
-
-    def _extract_reviewer_name(
-        self,
-        card
-    ) -> str:
-        """
-        Extract reviewer display name.
-        """
-
-        element = card.select_one(
-            ".a-profile-name"
-        )
-
-        if element:
-
-            name = self._clean_text(
-                element.get_text(
-                    " ",
-                    strip=True
-                )
-            )
-
-            if name:
-                return name[:255]
-
-        return "Amazon Customer"
-
-    def _extract_review_date(
-        self,
-        card
-    ):
-        """
-        Extract review date.
-        """
-
-        element = card.select_one(
-            "span[data-hook='review-date']"
-        )
-
-        if not element:
-            return None
-
-        date_text = self._clean_text(
-            element.get_text(
+        # Generic fallback.
+        card_text = self._clean_text(
+            card.get_text(
                 " ",
                 strip=True
             )
         )
 
-        return self.parse_review_date(
-            date_text
+        return bool(
+            re.search(
+                r"\bVerified Purchase\b",
+                card_text,
+                re.IGNORECASE
+            )
         )
 
-    # ------------------------------------------------------------------
-    # Reviews
-    # ------------------------------------------------------------------
+    # ==============================================================
+    # REVIEWS
+    # ==============================================================
 
     def scrape_reviews(
         self,
@@ -1059,168 +1385,193 @@ class AmazonScraper(BaseScraper):
         max_pages: int = 3
     ) -> list:
         """
-        Scrape Amazon customer reviews page by page.
+        Extract publicly visible reviews from the Amazon
+        product page.
 
-        Supports Amazon short URLs.
+        Amazon currently exposes a small number of review cards
+        directly on the product page. We use those cards instead
+        of depending on the standalone review URL.
         """
 
-        # --------------------------------------------------------------
-        # Resolve short URL first.
-        # --------------------------------------------------------------
-        final_url, asin = self._resolve_amazon_url(
-            product_url
+        # ----------------------------------------------------------
+        # Resolve URL and ASIN.
+        # ----------------------------------------------------------
+        final_url, asin = (
+            self._resolve_amazon_url(
+                product_url
+            )
         )
 
-        parsed_url = urlparse(
-            final_url
-        )
-
-        domain = (
-            parsed_url.netloc
-            or "www.amazon.in"
-        )
-
-        if "amazon" not in domain.lower():
+        if not asin:
             raise ValueError(
-                "The supplied URL does not appear to be an Amazon URL."
+                "Could not determine Amazon ASIN."
             )
 
-        reviews = []
-        seen_reviews = set()
+        # ----------------------------------------------------------
+        # Make sure product page is loaded.
+        # ----------------------------------------------------------
+        try:
 
-        # --------------------------------------------------------------
-        # Scrape review pages.
-        # --------------------------------------------------------------
-        for page in range(
-            1,
-            max_pages + 1
-        ):
+            if self.driver.current_url != final_url:
 
-            review_url = (
-                f"https://{domain}"
-                f"/product-reviews/{asin}"
-                f"?pageNumber={page}"
-                f"&sortBy=recent"
-            )
-
-            try:
                 self.driver.get(
-                    review_url
+                    final_url
                 )
 
                 time.sleep(3)
 
-            except Exception:
-                break
+        except Exception:
+            pass
 
-            soup = BeautifulSoup(
-                self.driver.page_source,
-                "html.parser"
+        # ----------------------------------------------------------
+        # Scroll down to load the review section.
+        # ----------------------------------------------------------
+        try:
+
+            self.driver.execute_script(
+                "window.scrollTo("
+                "0, document.body.scrollHeight * 0.60"
+                ");"
             )
 
-            if self._is_blocked_page(
+            time.sleep(2)
+
+            self.driver.execute_script(
+                "window.scrollTo("
+                "0, document.body.scrollHeight"
+                ");"
+            )
+
+            time.sleep(3)
+
+        except Exception:
+            pass
+
+        # ----------------------------------------------------------
+        # Parse final page.
+        # ----------------------------------------------------------
+        soup = BeautifulSoup(
+            self.driver.page_source,
+            "html.parser"
+        )
+
+        if self._is_blocked_page(
+            soup
+        ):
+            return []
+
+        # ----------------------------------------------------------
+        # Find actual review cards.
+        # ----------------------------------------------------------
+        review_cards = (
+            self._extract_review_cards(
                 soup
-            ):
-                break
-
-            review_cards = (
-                self._extract_review_cards(
-                    soup
-                )
             )
+        )
 
-            if not review_cards:
-                break
+        reviews = []
+        seen_reviews = set()
 
-            page_review_count = 0
+        # ----------------------------------------------------------
+        # Parse review cards.
+        # ----------------------------------------------------------
+        for card in review_cards:
 
-            for card in review_cards:
+            try:
 
-                try:
-                    reviewer_name = (
-                        self._extract_reviewer_name(
-                            card
-                        )
+                reviewer_name = (
+                    self._extract_reviewer_name(
+                        card
                     )
+                )
 
-                    rating = (
-                        self._extract_review_rating(
-                            card
-                        )
+                rating = (
+                    self._extract_review_rating(
+                        card
                     )
+                )
 
-                    review_title = (
-                        self._extract_review_title(
-                            card
-                        )
+                review_title = (
+                    self._extract_review_title(
+                        card
                     )
+                )
 
-                    review_text = (
-                        self._extract_review_body(
-                            card
-                        )
+                review_text = (
+                    self._extract_review_body(
+                        card
                     )
+                )
 
-                    review_date = (
-                        self._extract_review_date(
-                            card
-                        )
+                review_date = (
+                    self._extract_review_date(
+                        card
                     )
+                )
 
-                    is_verified = (
-                        self._extract_verified_purchase(
-                            card
-                        )
+                is_verified = (
+                    self._extract_verified_purchase(
+                        card
                     )
+                )
 
-                    # Ignore empty reviews.
-                    if not review_text:
-                        continue
-
-                    # Prevent duplicate records.
-                    review_key = (
-                        reviewer_name.lower().strip(),
-                        rating,
-                        review_title.lower().strip(),
-                        review_text.lower().strip(),
-                    )
-
-                    if review_key in seen_reviews:
-                        continue
-
-                    seen_reviews.add(
-                        review_key
-                    )
-
-                    reviews.append({
-                        "reviewer_name": (
-                            reviewer_name
-                            or "Amazon Customer"
-                        )[:255],
-
-                        "rating": rating,
-
-                        "review_title": (
-                            review_title
-                        )[:500],
-
-                        "review_text": review_text,
-
-                        "review_date": review_date,
-
-                        "is_verified_purchase": (
-                            is_verified
-                        ),
-                    })
-
-                    page_review_count += 1
-
-                except Exception:
-                    # Ignore a malformed card and continue.
+                # --------------------------------------------------
+                # Do not save empty reviews.
+                # --------------------------------------------------
+                if not review_text:
                     continue
 
-            # No usable reviews on this page.
-            if page_review_count == 0:
-                break
+                # --------------------------------------------------
+                # Do not accept invalid ratings.
+                # --------------------------------------------------
+                if not (
+                    1.0
+                    <= rating
+                    <= 5.0
+                ):
+                    continue
+
+                # --------------------------------------------------
+                # Duplicate protection.
+                # --------------------------------------------------
+                review_key = (
+                    reviewer_name.lower().strip(),
+                    rating,
+                    review_title.lower().strip(),
+                    review_text.lower().strip(),
+                )
+
+                if review_key in seen_reviews:
+                    continue
+
+                seen_reviews.add(
+                    review_key
+                )
+
+                reviews.append({
+                    "reviewer_name": (
+                        reviewer_name
+                        or "Amazon Customer"
+                    )[:255],
+
+                    "rating": rating,
+
+                    "review_title": (
+                        review_title
+                    )[:500],
+
+                    "review_text": review_text,
+
+                    "review_date": review_date,
+
+                    "is_verified_purchase": (
+                        is_verified
+                    ),
+                })
+
+            except Exception:
+                # One malformed review must not stop
+                # the remaining reviews.
+                continue
 
         return reviews
