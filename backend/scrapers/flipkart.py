@@ -94,7 +94,7 @@ class FlipkartScraper(BaseScraper):
         )
 
         # ---------------------------------------------------------
-        # 1. Title
+        # 1. Product title
         # ---------------------------------------------------------
         title_tag = (
             soup.select_one("h1 span")
@@ -115,7 +115,7 @@ class FlipkartScraper(BaseScraper):
             title = ""
 
         # ---------------------------------------------------------
-        # 2. Prices
+        # 2. Current price
         # ---------------------------------------------------------
         prices = [
             text.strip()
@@ -133,6 +133,9 @@ class FlipkartScraper(BaseScraper):
                 prices[0]
             )
 
+        # ---------------------------------------------------------
+        # 3. Original price / MRP
+        # ---------------------------------------------------------
         original_price = current_price
 
         if len(prices) > 1:
@@ -144,7 +147,7 @@ class FlipkartScraper(BaseScraper):
                 original_price = second_price
 
         # ---------------------------------------------------------
-        # 3. Rating
+        # 4. Product rating
         # ---------------------------------------------------------
         ratings = [
             text.strip()
@@ -164,53 +167,126 @@ class FlipkartScraper(BaseScraper):
                 rating = None
 
         # ---------------------------------------------------------
-        # 4. Review count
+        # 5. Total review count
         #
-        # Current Flipkart page shows:
+        # Current Flipkart page displays:
         #
         # 4.5
         # | 1,987
         #
-        # The separate old review-count selectors may not exist.
+        # The review count is inside the rating link.
         # ---------------------------------------------------------
         review_count = 0
 
-        count_tag = (
-            soup.select_one("span.Wphh3L")
-            or soup.select_one("span._2_R_DZ")
-        )
-
-        if count_tag:
-            match = re.search(
-                r"([\d,]+)\s+Reviews",
-                count_tag.get_text(strip=True),
-                re.IGNORECASE,
-            )
-
-            if match:
-                review_count = int(
-                    match.group(1).replace(",", "")
+        # Current Flipkart markup
+        for link in soup.find_all("a"):
+            try:
+                link_text = link.get_text(
+                    separator=" ",
+                    strip=True,
                 )
 
+                match = re.search(
+                    r"\|\s*([\d,]+)",
+                    link_text,
+                )
+
+                if match:
+                    review_count = int(
+                        match.group(1).replace(",", "")
+                    )
+                    break
+
+            except (ValueError, TypeError):
+                continue
+
+        # Fallback for older Flipkart markup
+        if review_count == 0:
+            count_tag = (
+                soup.select_one("span.Wphh3L")
+                or soup.select_one("span._2_R_DZ")
+            )
+
+            if count_tag:
+                match = re.search(
+                    r"([\d,]+)\s+Reviews",
+                    count_tag.get_text(strip=True),
+                    re.IGNORECASE,
+                )
+
+                if match:
+                    review_count = int(
+                        match.group(1).replace(",", "")
+                    )
+
         # ---------------------------------------------------------
-        # 5. Image
+        # 6. Product image
+        #
+        # Prefer actual product images from:
+        # rukminim2.flixcart.com/image/...
+        #
+        # Avoid Flipkart's own logo SVG.
         # ---------------------------------------------------------
-        img_tag = (
-            soup.select_one("img.DByuf4")
-            or soup.select_one("img._396cs4")
+        image_url = ""
+
+        # First try actual product image <img> elements.
+        product_img = (
+            soup.select_one(
+                'img[src*="rukminim2.flixcart.com/image/"]'
+            )
             or soup.select_one(
-                'img[src*="flixcart"]'
+                'img[data-src*="rukminim2.flixcart.com/image/"]'
             )
         )
 
-        image_url = ""
-
-        if img_tag:
+        if product_img:
             image_url = (
-                img_tag.get("src")
-                or img_tag.get("data-src")
+                product_img.get("src")
+                or product_img.get("data-src")
                 or ""
             )
+
+        # Second try other Flipkart image URLs.
+        if not image_url:
+
+            for img in soup.find_all("img"):
+                src = (
+                    img.get("src")
+                    or img.get("data-src")
+                    or ""
+                )
+
+                if (
+                    "flixcart.com/image/" in src
+                    and not src.endswith(".svg")
+                ):
+                    image_url = src
+                    break
+
+        # Third try preloaded images.
+        if not image_url:
+
+            preload_tags = soup.select(
+                'link[rel="preload"][as="image"]'
+            )
+
+            for tag in preload_tags:
+
+                srcset = tag.get(
+                    "imagesrcset",
+                    "",
+                )
+
+                match = re.search(
+                    r"https://[^,\s]+"
+                    r"rukminim2\.flixcart\.com/"
+                    r"image/[^,\s]+",
+                    srcset,
+                )
+
+                if match:
+                    image_url = match.group(0)
+                    break
 
         return {
             "title": title,
@@ -242,28 +318,48 @@ class FlipkartScraper(BaseScraper):
             )
         )
 
+    def _xpath_literal(self, value: str) -> str:
+        """
+        Safely create an XPath string literal.
+
+        Handles reviewer names containing apostrophes.
+        """
+        if "'" not in value:
+            return f"'{value}'"
+
+        if '"' not in value:
+            return f'"{value}"'
+
+        parts = value.split("'")
+
+        return (
+            "concat("
+            + ", \"'\", ".join(
+                f"'{part}'"
+                for part in parts
+            )
+            + ")"
+        )
+
     def _extract_reviewer_and_card(
         self,
         verified_element,
     ):
         """
-        From the current Flipkart Verified Buyer element,
-        find the reviewer name and then locate the complete
-        review card using the reviewer element.
+        Find the reviewer name and complete review card.
 
-        Current structure observed:
+        Current Flipkart structure:
 
         Reviewer
-          |
+            |
         Verified Buyer
-          |
+            |
         wrapper
-          |
+            |
         reviewer container
-          |
+            |
         complete review card
         """
-
         try:
             # Parent 2 contains:
             #
@@ -271,8 +367,7 @@ class FlipkartScraper(BaseScraper):
             # Verified Buyer
             #
             reviewer_container = (
-                verified_element
-                .find_element(
+                verified_element.find_element(
                     "xpath",
                     "../..",
                 )
@@ -298,10 +393,13 @@ class FlipkartScraper(BaseScraper):
             if not reviewer_name:
                 return None, None
 
-            # Find the actual reviewer-name element.
+            # Find actual reviewer element.
             reviewer_elements = reviewer_container.find_elements(
                 "xpath",
-                f".//*[normalize-space(text())={self._xpath_literal(reviewer_name)}]",
+                (
+                    ".//*[normalize-space(text())="
+                    f"{self._xpath_literal(reviewer_name)}]"
+                ),
             )
 
             if not reviewer_elements:
@@ -309,11 +407,8 @@ class FlipkartScraper(BaseScraper):
 
             reviewer_element = reviewer_elements[0]
 
-            # From reviewer element:
-            #
-            # parent 1
-            # parent 2
-            # parent 3 = complete review card
+            # Reviewer element -> parent 1 -> parent 2
+            # -> parent 3 = complete review card
             card = reviewer_element
 
             for _ in range(3):
@@ -327,28 +422,6 @@ class FlipkartScraper(BaseScraper):
         except Exception:
             return None, None
 
-    def _xpath_literal(self, value: str) -> str:
-        """
-        Safely create an XPath string literal.
-        Handles names containing apostrophes.
-        """
-        if "'" not in value:
-            return f"'{value}'"
-
-        if '"' not in value:
-            return f'"{value}"'
-
-        parts = value.split("'")
-
-        return (
-            "concat("
-            + ", \"'\", ".join(
-                f"'{part}'"
-                for part in parts
-            )
-            + ")"
-        )
-
     def _parse_review_card(
         self,
         card,
@@ -357,7 +430,7 @@ class FlipkartScraper(BaseScraper):
         """
         Parse one Flipkart review card.
 
-        Current observed structure:
+        Example structure:
 
         5
         Brilliant
@@ -368,18 +441,19 @@ class FlipkartScraper(BaseScraper):
         256
         57
         """
-
         try:
             lines = [
                 line.strip()
-                for line
-                in card.text.splitlines()
+                for line in card.text.splitlines()
                 if line.strip()
             ]
 
             if not lines:
                 return None
 
+            # -----------------------------------------------------
+            # Find reviewer position
+            # -----------------------------------------------------
             reviewer_index = None
 
             for index, line in enumerate(lines):
@@ -391,7 +465,7 @@ class FlipkartScraper(BaseScraper):
                 return None
 
             # -----------------------------------------------------
-            # Rating
+            # Find rating
             # -----------------------------------------------------
             rating = None
             rating_index = None
@@ -416,7 +490,7 @@ class FlipkartScraper(BaseScraper):
                 return None
 
             # -----------------------------------------------------
-            # Title
+            # Review title
             # -----------------------------------------------------
             review_title = ""
 
@@ -431,12 +505,10 @@ class FlipkartScraper(BaseScraper):
                 if not self._is_relative_date(
                     possible_title
                 ):
-                    review_title = (
-                        possible_title
-                    )
+                    review_title = possible_title
 
             # -----------------------------------------------------
-            # Date
+            # Review date
             # -----------------------------------------------------
             review_date = None
             date_index = None
@@ -479,7 +551,7 @@ class FlipkartScraper(BaseScraper):
 
             for line in body_lines:
 
-                # Remove Flipkart helpful counters.
+                # Helpful/reaction counters.
                 if line in {
                     "256",
                     "57",
@@ -487,7 +559,7 @@ class FlipkartScraper(BaseScraper):
                 }:
                     continue
 
-                # Remove trailing "...more".
+                # Remove Flipkart's "...more".
                 line = re.sub(
                     r"\.\.\.\s*more$",
                     "",
@@ -495,14 +567,13 @@ class FlipkartScraper(BaseScraper):
                     flags=re.IGNORECASE,
                 ).strip()
 
-                # Ignore standalone "more".
                 if line.lower() == "more":
                     continue
 
                 if line:
                     cleaned_body.append(line)
 
-            # In case title accidentally appears in body.
+            # Do not duplicate title inside body.
             cleaned_body = [
                 line
                 for line in cleaned_body
@@ -514,7 +585,7 @@ class FlipkartScraper(BaseScraper):
             ).strip()
 
             # -----------------------------------------------------
-            # Verification status
+            # Verified buyer
             # -----------------------------------------------------
             is_verified_purchase = (
                 "Verified Buyer" in lines
@@ -543,16 +614,14 @@ class FlipkartScraper(BaseScraper):
         Scrape Flipkart reviews from the current
         Ratings and Reviews bottom-sheet panel.
 
-        Note:
-        Flipkart currently loads reviews dynamically when the
-        product rating/review-count link is clicked.
+        Flipkart currently loads reviews dynamically when
+        the product rating/review-count link is clicked.
         """
-
         reviews = []
 
         try:
             # -----------------------------------------------------
-            # Open product page
+            # 1. Open product page
             # -----------------------------------------------------
             self.driver.get(product_url)
             time.sleep(5)
@@ -560,7 +629,7 @@ class FlipkartScraper(BaseScraper):
             self.dismiss_login_popup()
 
             # -----------------------------------------------------
-            # Scroll until rating/review section is available
+            # 2. Scroll to rating/review section
             # -----------------------------------------------------
             self.driver.execute_script(
                 """
@@ -574,7 +643,7 @@ class FlipkartScraper(BaseScraper):
             time.sleep(3)
 
             # -----------------------------------------------------
-            # Find rating/review link
+            # 3. Find rating/review link
             #
             # Example:
             #
@@ -625,7 +694,7 @@ class FlipkartScraper(BaseScraper):
                 return reviews
 
             # -----------------------------------------------------
-            # Click rating/review link
+            # 4. Click rating/review link
             # -----------------------------------------------------
             self.driver.execute_script(
                 """
@@ -646,7 +715,7 @@ class FlipkartScraper(BaseScraper):
             time.sleep(3)
 
             # -----------------------------------------------------
-            # Find bottom-sheet
+            # 5. Find review bottom sheet
             # -----------------------------------------------------
             panel_elements = self.driver.find_elements(
                 "css selector",
@@ -659,7 +728,7 @@ class FlipkartScraper(BaseScraper):
             panel = panel_elements[0]
 
             # -----------------------------------------------------
-            # Find Verified Buyer elements
+            # 6. Find Verified Buyer elements
             # -----------------------------------------------------
             verified_elements = panel.find_elements(
                 "xpath",
@@ -668,6 +737,9 @@ class FlipkartScraper(BaseScraper):
 
             seen_reviews = set()
 
+            # -----------------------------------------------------
+            # 7. Parse each review
+            # -----------------------------------------------------
             for verified_element in verified_elements:
 
                 reviewer_name, card = (
@@ -676,7 +748,10 @@ class FlipkartScraper(BaseScraper):
                     )
                 )
 
-                if not reviewer_name or card is None:
+                if (
+                    not reviewer_name
+                    or card is None
+                ):
                     continue
 
                 review = self._parse_review_card(
