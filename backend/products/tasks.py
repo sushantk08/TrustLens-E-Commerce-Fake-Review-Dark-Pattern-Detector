@@ -45,6 +45,7 @@ def run_product_analysis(self, product_url):
             'business_category': business_category,
             'title': product_data.get('title', '')[:500],
             'current_price': product_data.get('current_price') or 0.0,
+            'original_price': product_data.get('original_price') or 0.0,
             'rating': product_data.get('rating'),
             'total_reviews_count': product_data.get('total_reviews_count') or len(scraped_reviews),
             'image_url': product_data.get('image_url', '')[:1000],
