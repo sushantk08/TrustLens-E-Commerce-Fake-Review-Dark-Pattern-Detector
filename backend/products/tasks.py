@@ -1,4 +1,3 @@
-from datetime import datetime
 from celery import shared_task
 from django.utils import timezone
 
@@ -13,105 +12,225 @@ from .models import Product, Review, PriceHistory, AnalysisReport
 @shared_task(bind=True)
 def run_product_analysis(self, product_url):
     task_id = self.request.id
-    if 'amazon' in product_url.lower():
-        platform = 'amazon'
+
+    # 1. Detect platform
+    if "amazon" in product_url.lower():
+        platform = "amazon"
         scraper_class = AmazonScraper
-    elif 'flipkart' in product_url.lower():
-        platform = 'flipkart'
+
+    elif "flipkart" in product_url.lower():
+        platform = "flipkart"
         scraper_class = FlipkartScraper
+
     else:
-        platform = 'google_maps'
+        platform = "google_maps"
         scraper_class = GoogleMapsScraper
-    # 2. Scrape Metadata & Reviews
+
+    # 2. Scrape product details and reviews
     try:
         with scraper_class() as scraper:
-            send_task_progress(task_id, step='SCRAPING_PRODUCT', progress_percent=25, message='Extracting product details and current pricing...')
-            product_data = scraper.scrape_product_details(product_url)
 
-            send_task_progress(task_id, step='SCRAPING_REVIEWS', progress_percent=50, message='Fetching and parsing customer reviews...')
-            scraped_reviews = scraper.scrape_reviews(product_url, max_pages=10)
+            send_task_progress(
+                task_id,
+                step="SCRAPING_PRODUCT",
+                progress_percent=25,
+                message="Extracting product details and current pricing...",
+            )
+
+            product_data = scraper.scrape_product_details(
+                product_url
+            )
+
+            send_task_progress(
+                task_id,
+                step="SCRAPING_REVIEWS",
+                progress_percent=50,
+                message="Fetching and parsing customer reviews...",
+            )
+
+            scraped_reviews = scraper.scrape_reviews(
+                product_url,
+                max_pages=10,
+            )
+
     except Exception as e:
-        send_task_progress(task_id, step='FAILED', progress_percent=0, message=f'Scraping failed: {str(e)}')
-        return {'status': 'error', 'message': str(e)}
+        send_task_progress(
+            task_id,
+            step="FAILED",
+            progress_percent=0,
+            message=f"Scraping failed: {str(e)}",
+        )
 
-    # 3. Save or Update Product in Database
-    business_category = product_data.get('business_category', 'ecommerce')
+        return {
+            "status": "error",
+            "message": str(e),
+        }
 
-    # 3. Save or Update Product in Database
+    # 3. Product category
+    business_category = product_data.get(
+        "business_category",
+        "ecommerce",
+    )
+
+    # 4. Save or update product
     product, _ = Product.objects.update_or_create(
         url=product_url,
         defaults={
-            'platform': platform,
-            'business_category': business_category,
-            'title': product_data.get('title', '')[:500],
-            'current_price': product_data.get('current_price') or 0.0,
-            'original_price': product_data.get('original_price') or 0.0,
-            'rating': product_data.get('rating'),
-            'total_reviews_count': product_data.get('total_reviews_count') or len(scraped_reviews),
-            'image_url': product_data.get('image_url', '')[:1000],
-            'last_scraped_at': timezone.now(),
-        }
+            "platform": platform,
+            "business_category": business_category,
+            "title": product_data.get(
+                "title",
+                "",
+            )[:500],
+            "current_price": (
+                product_data.get("current_price")
+                or 0.0
+            ),
+            "original_price": (
+                product_data.get("original_price")
+                or 0.0
+            ),
+            "rating": product_data.get("rating"),
+            "total_reviews_count": (
+                product_data.get("total_reviews_count")
+                or len(scraped_reviews)
+            ),
+            "image_url": product_data.get(
+                "image_url",
+                "",
+            )[:1000],
+            "last_scraped_at": timezone.now(),
+        },
     )
 
-    # Save Price History snapshot
+    # 5. Save price history snapshot
     if product.current_price:
         PriceHistory.objects.create(
             product=product,
             price=product.current_price,
-            stock_status=''
+            stock_status="",
         )
 
-    # Save Reviews
-    for r in scraped_reviews:
+    # 6. Save reviews
+    for review_data in scraped_reviews:
+
+        # Use the actual scraped rating.
+        # Never replace a missing rating with a fake 5.0.
+        review_rating = review_data.get("rating")
+
+        # Review.rating is required in the database.
+        # Skip the review if the scraper did not return a rating.
+        if review_rating is None:
+            continue
+
         Review.objects.update_or_create(
             product=product,
-            reviewer_name=r.get('reviewer_name', 'Anonymous')[:255],
-            review_text=r.get('review_text', ''),
+            reviewer_name=review_data.get(
+                "reviewer_name",
+                "Anonymous",
+            )[:255],
+            review_text=review_data.get(
+                "review_text",
+                "",
+            ),
             defaults={
-                'rating': r.get('rating', 5.0),
-                'review_title': r.get('review_title', '')[:500],
-                'review_date': r.get('review_date'),
-                'is_verified_purchase': r.get('is_verified_purchase', False),
-                'is_local_guide': r.get('is_local_guide', False),
-                'reviewer_total_reviews': r.get('reviewer_total_reviews', 1),
-            }
+                "rating": review_rating,
+                "review_title": review_data.get(
+                    "review_title",
+                    "",
+                )[:500],
+                "review_date": review_data.get(
+                    "review_date"
+                ),
+                "is_verified_purchase": review_data.get(
+                    "is_verified_purchase",
+                    False,
+                ),
+                "is_local_guide": review_data.get(
+                    "is_local_guide",
+                    False,
+                ),
+                "reviewer_total_reviews": review_data.get(
+                    "reviewer_total_reviews",
+                    1,
+                ),
+            },
         )
 
-    # 4. Run Analysis Engine
-    send_task_progress(task_id, step='ANALYZING', progress_percent=75, message='Analyzing review velocity, semantics, and dark patterns...')
+    # 7. Run analysis engine
+    send_task_progress(
+        task_id,
+        step="ANALYZING",
+        progress_percent=75,
+        message=(
+            "Analyzing review velocity, semantics, "
+            "and dark patterns..."
+        ),
+    )
 
-    db_reviews = list(product.reviews.values())
-    price_history = list(product.price_history.values())
+    db_reviews = list(
+        product.reviews.values()
+    )
+
+    price_history = list(
+        product.price_history.values()
+    )
 
     analysis_res = compute_true_trust_score(
         reviews=db_reviews,
         price_history=price_history,
-        current_price=float(product.current_price or 0.0),
-        original_price=float(product.original_price or 0.0),
-        category=product.business_category  
-    
+        current_price=float(
+            product.current_price or 0.0
+        ),
+        original_price=float(
+            product.original_price or 0.0
+        ),
+        category=product.business_category,
     )
 
-    # 5. Persist Analysis Report
+    # 8. Save analysis report
     AnalysisReport.objects.update_or_create(
         product=product,
         defaults={
-            'trust_score': analysis_res['trust_score'],
-            'fake_review_percentage': analysis_res['fake_review_percentage'],
-            'velocity_spike_detected': analysis_res['velocity_spike_detected'],
-            'dark_patterns_detected': analysis_res['dark_patterns_detected'],
-            'aspects_sentiment': analysis_res['aspects_sentiment'],
-            'summary_reasons': analysis_res['summary_reasons'],
-        }
+            "trust_score": analysis_res[
+                "trust_score"
+            ],
+            "fake_review_percentage": analysis_res[
+                "fake_review_percentage"
+            ],
+            "velocity_spike_detected": analysis_res[
+                "velocity_spike_detected"
+            ],
+            "dark_patterns_detected": analysis_res[
+                "dark_patterns_detected"
+            ],
+            "aspects_sentiment": analysis_res[
+                "aspects_sentiment"
+            ],
+            "summary_reasons": analysis_res[
+                "summary_reasons"
+            ],
+        },
     )
 
-    # 6. Send Completion WebSocket event with final product ID
+    # 9. Send completion event
     send_task_progress(
         task_id,
-        step='COMPLETED',
+        step="COMPLETED",
         progress_percent=100,
-        message='Analysis complete.',
-        data={'product_id': product.id, 'trust_score': analysis_res['trust_score']}
+        message="Analysis complete.",
+        data={
+            "product_id": product.id,
+            "trust_score": analysis_res[
+                "trust_score"
+            ],
+        },
     )
 
-    return {'status': 'success', 'product_id': product.id, 'trust_score': analysis_res['trust_score']}
+    return {
+        "status": "success",
+        "product_id": product.id,
+        "trust_score": analysis_res[
+            "trust_score"
+        ],
+    }
