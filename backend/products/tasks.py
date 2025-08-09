@@ -26,7 +26,7 @@ def run_product_analysis(self, product_url):
         platform = "google_maps"
         scraper_class = GoogleMapsScraper
 
-    # 2. Scrape product details and reviews
+    # 2. Scrape product metadata and reviews
     try:
         with scraper_class() as scraper:
 
@@ -103,7 +103,7 @@ def run_product_analysis(self, product_url):
         },
     )
 
-    # 5. Save price history snapshot
+    # 5. Save price history
     if product.current_price:
         PriceHistory.objects.create(
             product=product,
@@ -115,11 +115,11 @@ def run_product_analysis(self, product_url):
     for review_data in scraped_reviews:
 
         # Use the actual scraped rating.
-        # Never replace a missing rating with a fake 5.0.
+        # Do not create a fake 5-star rating when
+        # the scraper does not provide one.
         review_rating = review_data.get("rating")
 
-        # Review.rating is required in the database.
-        # Skip the review if the scraper did not return a rating.
+        # Review.rating is required by the database.
         if review_rating is None:
             continue
 
@@ -140,7 +140,7 @@ def run_product_analysis(self, product_url):
                     "",
                 )[:500],
                 "review_date": review_data.get(
-                    "review_date"
+                    "review_date",
                 ),
                 "is_verified_purchase": review_data.get(
                     "is_verified_purchase",
