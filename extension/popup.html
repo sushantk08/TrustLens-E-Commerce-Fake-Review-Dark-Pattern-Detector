@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>TrustLens</title>
+  <style>
+    body {
+      width: 320px;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      margin: 0;
+      padding: 16px;
+      background-color: #f9fafb;
+      color: #111827;
+    }
+    .header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-bottom: 1px solid #e5e7eb;
+      padding-bottom: 10px;
+      margin-bottom: 12px;
+    }
+    .title {
+      font-size: 16px;
+      font-weight: 700;
+      color: #2563eb;
+    }
+    .status-text {
+      font-size: 12px;
+      color: #6b7280;
+      margin-bottom: 12px;
+      word-break: break-all;
+    }
+    .btn {
+      width: 100%;
+      background-color: #2563eb;
+      color: white;
+      border: none;
+      padding: 10px;
+      border-radius: 6px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .btn:disabled {
+      background-color: #93c5fd;
+      cursor: not-allowed;
+    }
+    .card {
+      display: none;
+      background: white;
+      border: 1px solid #e5e7eb;
+      border-radius: 8px;
+      padding: 14px;
+      margin-top: 12px;
+    }
+    .score-badge {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 8px;
+    }
+    .score-val {
+      font-size: 24px;
+      font-weight: 800;
+    }
+    .score-good { color: #16a34a; }
+    .score-avg { color: #d97706; }
+    .score-bad { color: #dc2626; }
+    .alert-item {
+      font-size: 11px;
+      background-color: #fef3c7;
+      color: #92400e;
+      padding: 6px;
+      border-radius: 4px;
+      margin-top: 6px;
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div class="title">TrustLens</div>
+    <span style="font-size: 10px; color: #9ca3af; text-transform: uppercase;">Inspector</span>
+  </div>
+
+  <div id="url-label" class="status-text">Detecting active product tab...</div>
+
+  <button id="analyze-btn" class="btn">Analyze Current Page</button>
+
+  <div id="result-card" class="card">
+    <div class="score-badge">
+      <span style="font-size: 12px; color: #6b7280; font-weight: 600;">True Trust Score</span>
+      <div id="score-display" class="score-val">--</div>
+    </div>
+    <div style="font-size: 12px; color: #4b5563; margin-bottom: 6px;">
+      Suspicious Reviews: <strong id="fake-pct">--%</strong>
+    </div>
+    <div id="alerts-container"></div>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

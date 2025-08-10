@@ -1,0 +1,19 @@
+{
+  "manifest_version": 3,
+  "name": "TrustLens - E-Commerce Review & Dark Pattern Detector",
+  "version": "1.0.0",
+  "description": "Expose fake review rings and deceptive pricing directly while browsing Amazon and Flipkart.",
+  "permissions": [
+    "activeTab"
+  ],
+  "host_permissions": [
+    "*://*.amazon.in/*",
+    "*://*.amazon.com/*",
+    "*://*.flipkart.com/*",
+    "http://localhost:8000/*"
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Check TrustLens Score"
+  }
+}
