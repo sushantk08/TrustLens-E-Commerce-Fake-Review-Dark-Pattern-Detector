@@ -1,4 +1,4 @@
-const BACKEND_BASE = 'http://localhost:8000';
+const BACKEND_BASE = 'http://127.0.0.1:8000';
 
 document.addEventListener('DOMContentLoaded', async () => {
   const urlLabel = document.getElementById('url-label');
@@ -8,21 +8,21 @@ document.addEventListener('DOMContentLoaded', async () => {
   const fakePct = document.getElementById('fake-pct');
   const alertsContainer = document.getElementById('alerts-container');
 
-  // Query active browser tab
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  // Query active tab using lastFocusedWindow so it works even when inspecting
+  const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
   const tabUrl = tab?.url || '';
 
   const isSupported = tabUrl.includes('amazon.') || tabUrl.includes('flipkart.');
 
   if (!isSupported) {
-    urlLabel.textContent = 'Please open an Amazon or Flipkart product listing to analyze.';
+    urlLabel.textContent = 'Please switch to an Amazon or Flipkart product listing tab.';
     analyzeBtn.disabled = true;
     return;
   }
 
-  urlLabel.textContent = tabUrl.substring(0, 50) + '...';
+  urlLabel.textContent = tabUrl.length > 45 ? tabUrl.substring(0, 45) + '...' : tabUrl;
 
-  // Check if product report is already cached in PostgreSQL
+  // 1. Check if report is already cached in database
   try {
     const lookupRes = await fetch(`${BACKEND_BASE}/api/products/lookup/?url=${encodeURIComponent(tabUrl)}`);
     if (lookupRes.ok) {
@@ -31,12 +31,14 @@ document.addEventListener('DOMContentLoaded', async () => {
         renderScore(productData.analysis_report);
         analyzeBtn.textContent = 'Re-Analyze Product';
       }
+    } else {
+      urlLabel.textContent = 'Uncached product. Click below to analyze.';
     }
   } catch (err) {
-    console.log('Backend not reachable yet or uncached:', err);
+    console.log('Backend not running or uncached.');
   }
 
-  // Trigger analysis on click
+  // 2. Trigger analysis on click
   analyzeBtn.addEventListener('click', async () => {
     analyzeBtn.disabled = true;
     analyzeBtn.textContent = 'Analyzing in Background...';
@@ -50,9 +52,11 @@ document.addEventListener('DOMContentLoaded', async () => {
       });
 
       const data = await response.json();
-      if (!response.ok) throw new Error(data.error || 'Failed to trigger');
+      if (!response.ok) {
+        throw new Error(data.error || 'Server rejected request');
+      }
 
-      // Poll product lookup until report is ready
+      urlLabel.textContent = 'Analysis running in Celery... checking results...';
       pollReport(tabUrl);
     } catch (err) {
       urlLabel.textContent = 'Error: ' + err.message;
@@ -71,14 +75,14 @@ document.addEventListener('DOMContentLoaded', async () => {
             clearInterval(interval);
             renderScore(productData.analysis_report);
             analyzeBtn.disabled = false;
-            analyzeBtn.textContent = 'Analysis Complete';
-            urlLabel.textContent = 'Analysis finished successfully.';
+            analyzeBtn.textContent = 'Re-Analyze Product';
+            urlLabel.textContent = 'Analysis Complete!';
           }
         }
       } catch (e) {
-        // continue polling
+        // Continue polling
       }
-    }, 2000);
+    }, 2500);
   }
 
   function renderScore(report) {

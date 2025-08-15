@@ -2,64 +2,83 @@ import React, { useEffect, useState } from 'react';
 import { Loader2, CheckCircle2, AlertTriangle } from 'lucide-react';
 
 export default function LiveProgressBar({ taskId, onComplete, onError }) {
-  const [progress, setProgress] = useState(5);
-  const [stepMessage, setStepMessage] = useState('Connecting to real-time service...');
+  const [progress, setProgress] = useState(15);
+  const [stepMessage, setStepMessage] = useState('Analysis running in background...');
   const [isFailed, setIsFailed] = useState(false);
   const [isDone, setIsDone] = useState(false);
 
   useEffect(() => {
     if (!taskId) return;
 
-    // Connect to Django Channels WebSocket
-    const wsUrl = `ws://localhost:8000/ws/progress/${taskId}/`;
-    const socket = new WebSocket(wsUrl);
+    let isCompleted = false;
 
-    socket.onopen = () => {
-      setStepMessage('Connected. Awaiting scraping pipeline...');
-    };
+    // 1. Try WebSocket Connection
+    let socket = null;
+    try {
+      const wsUrl = `ws://127.0.0.1:8000/ws/progress/${taskId}/`;
+      socket = new WebSocket(wsUrl);
 
-    socket.onmessage = (event) => {
+      socket.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          if (data.status === 'connected') return;
+
+          if (data.progress !== undefined) setProgress(data.progress);
+          if (data.message) setStepMessage(data.message);
+
+          if (data.step === 'FAILED') {
+            setIsFailed(true);
+            if (onError) onError(data.message);
+          }
+
+          if (data.step === 'COMPLETED') {
+            isCompleted = true;
+            setIsDone(true);
+            setProgress(100);
+            if (onComplete && data.data?.product_id) {
+              onComplete(data.data.product_id);
+            }
+          }
+        } catch (e) {
+          console.error('WebSocket parse error:', e);
+        }
+      };
+
+      socket.onerror = () => {
+        console.log('WebSocket closed, polling active...');
+      };
+    } catch (e) {
+      console.log('Using polling fallback...');
+    }
+
+    // 2. Fallback Polling in case Redis/WebSocket disconnects
+    const pollInterval = setInterval(async () => {
+      if (isCompleted) {
+        clearInterval(pollInterval);
+        return;
+      }
+
       try {
-        const data = JSON.parse(event.data);
-
-        // Discard subscription handshake
-        if (data.status === 'connected') return;
-
-        if (data.progress !== undefined) {
-          setProgress(data.progress);
-        }
-
-        if (data.message) {
-          setStepMessage(data.message);
-        }
-
-        if (data.step === 'FAILED') {
-          setIsFailed(true);
-          if (onError) onError(data.message);
-        }
-
-        if (data.step === 'COMPLETED') {
-          setIsDone(true);
-          if (onComplete && data.data?.product_id) {
-            onComplete(data.data.product_id);
+        const res = await fetch(`http://127.0.0.1:8000/api/products/lookup/?task_id=${taskId}`);
+        if (res.ok) {
+          const prod = await res.json();
+          if (prod && prod.analysis_report) {
+            isCompleted = true;
+            clearInterval(pollInterval);
+            setIsDone(true);
+            setProgress(100);
+            setStepMessage('Analysis complete.');
+            if (onComplete) onComplete(prod.id);
           }
         }
       } catch (err) {
-        console.error('Error parsing WebSocket message:', err);
+        // Continue polling
       }
-    };
-
-    socket.onerror = (error) => {
-      console.error('WebSocket connection error:', error);
-      setStepMessage('WebSocket connection interrupted.');
-    };
-
-    socket.onclose = () => {
-      console.log('WebSocket closed.');
-    };
+    }, 3000);
 
     return () => {
-      socket.close();
+      if (socket) socket.close();
+      clearInterval(pollInterval);
     };
   }, [taskId]);
 
@@ -68,7 +87,7 @@ export default function LiveProgressBar({ taskId, onComplete, onError }) {
       <div className="flex items-center justify-between text-sm">
         <div className="flex items-center gap-2 font-medium text-gray-700">
           {isFailed ? (
-            <AlertTriangle className="text-red-500 animate-pulse" size={18} />
+            <AlertTriangle className="text-red-500" size={18} />
           ) : isDone ? (
             <CheckCircle2 className="text-green-500" size={18} />
           ) : (
@@ -79,15 +98,10 @@ export default function LiveProgressBar({ taskId, onComplete, onError }) {
         <span className="font-semibold text-gray-600">{progress}%</span>
       </div>
 
-      {/* Progress Bar Track */}
       <div className="w-full bg-gray-100 rounded-full h-2.5 overflow-hidden">
         <div
           className={`h-2.5 rounded-full transition-all duration-500 ease-out ${
-            isFailed
-              ? 'bg-red-500'
-              : isDone
-              ? 'bg-green-500'
-              : 'bg-blue-600'
+            isFailed ? 'bg-red-500' : isDone ? 'bg-green-500' : 'bg-blue-600'
           }`}
           style={{ width: `${progress}%` }}
         />

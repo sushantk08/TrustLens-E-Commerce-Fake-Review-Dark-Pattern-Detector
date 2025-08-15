@@ -26,7 +26,7 @@ def run_product_analysis(self, product_url):
             product_data = scraper.scrape_product_details(product_url)
 
             send_task_progress(task_id, step='SCRAPING_REVIEWS', progress_percent=50, message='Fetching and parsing customer reviews...')
-            scraped_reviews = scraper.scrape_reviews(product_url, max_pages=3)
+            scraped_reviews = scraper.scrape_reviews(product_url, max_pages=10)
     except Exception as e:
         send_task_progress(task_id, step='FAILED', progress_percent=0, message=f'Scraping failed: {str(e)}')
         return {'status': 'error', 'message': str(e)}
@@ -39,7 +39,7 @@ def run_product_analysis(self, product_url):
             'title': product_data.get('title', '')[:500],
             'current_price': product_data.get('current_price') or 0.0,
             'rating': product_data.get('rating'),
-            'total_reviews_count': product_data.get('total_reviews_count', len(scraped_reviews)),
+            'total_reviews_count': product_data.get('total_reviews_count') or len(scraped_reviews),
             'image_url': product_data.get('image_url', '')[:1000],
             'last_scraped_at': timezone.now(),
         }

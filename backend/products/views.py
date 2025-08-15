@@ -3,6 +3,7 @@ from django.shortcuts import get_object_or_404
 from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
+from celery.result import AsyncResult
 
 from .models import Product
 from .serializers import ProductDetailSerializer
@@ -50,14 +51,37 @@ class TriggerAnalysisView(APIView):
 
 class ProductDetailByUrlView(APIView):
     """
-    Lookup a product and its analysis report by URL query parameter.
-    Example: /api/products/lookup/?url=https://www.amazon.in/dp/...
+    Lookup a product and its analysis report by URL or by task_id.
     """
     def get(self, request):
         target_url = request.query_params.get('url')
+        task_id = request.query_params.get('task_id')
+
+        # Polling by task_id
+        if task_id:
+            result = AsyncResult(task_id)
+            if not result.ready():
+                return Response(
+                    {"status": "PENDING", "message": "Task is still running."},
+                    status=status.HTTP_202_ACCEPTED
+                )
+
+            result_data = result.result
+            if isinstance(result_data, dict) and result_data.get('product_id'):
+                product = Product.objects.filter(id=result_data['product_id']).first()
+                if product:
+                    serializer = ProductDetailSerializer(product)
+                    return Response(serializer.data, status=status.HTTP_200_OK)
+
+            return Response(
+                {"status": "FAILED", "message": "Task failed or product not found."},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        # Querying by product URL
         if not target_url:
             return Response(
-                {"error": "The 'url' query parameter is required."},
+                {"error": "Either 'url' or 'task_id' query parameter is required."},
                 status=status.HTTP_400_BAD_REQUEST
             )
 

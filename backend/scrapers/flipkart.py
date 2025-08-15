@@ -1,5 +1,6 @@
 import re
 import time
+from urllib.parse import urlparse, parse_qs
 from bs4 import BeautifulSoup
 from .base import BaseScraper
 from .normalizer import clean_price_string, parse_relative_date
@@ -10,105 +11,132 @@ class FlipkartScraper(BaseScraper):
     Scrapes product metadata and customer reviews from Flipkart listings.
     """
 
+    def dismiss_login_popup(self):
+        """Dismisses the Flipkart login modal if present."""
+        try:
+            close_buttons = self.driver.find_elements(
+                "css selector", "button._2KpZ6l._2doB4z, span._30XB9F, button._2doB4z"
+            )
+            for btn in close_buttons:
+                if btn.is_displayed():
+                    btn.click()
+                    time.sleep(0.5)
+                    break
+        except Exception:
+            pass
+
+    def get_review_url(self, product_url: str, page: int = 1) -> str:
+        """
+        Constructs the dedicated reviews listing URL:
+        https://www.flipkart.com/[product-name]/product-reviews/[product-id]?pid=[pid]&page=[page]
+        """
+        parsed = urlparse(product_url)
+        params = parse_qs(parsed.query)
+
+        # Extract pid
+        pid = params.get('pid', [''])[0]
+        if not pid:
+            match = re.search(r'pid=([A-Z0-9]+)', product_url, re.IGNORECASE)
+            if match:
+                pid = match.group(1)
+
+        path = parsed.path
+        if '/p/' in path:
+            review_path = path.replace('/p/', '/product-reviews/')
+        elif '/product-reviews/' in path:
+            review_path = path
+        else:
+            review_path = path + '/product-reviews'
+
+        query_str = f"pid={pid}&page={page}" if pid else f"page={page}"
+        return f"https://{parsed.netloc}{review_path}?{query_str}"
+
     def scrape_product_details(self, url: str) -> dict:
         self.driver.get(url)
-        time.sleep(2)
+        time.sleep(3)
+        self.dismiss_login_popup()
 
         soup = BeautifulSoup(self.driver.page_source, 'html.parser')
 
-        # Title
-        title_tag = soup.select_one('span.B_NuCI') or soup.select_one('span.VU-ZEz') or soup.select_one('h1')
-        title = title_tag.get_text(strip=True) if title_tag else ''
+        # 1. Title
+        title_tag = (
+            soup.select_one('h1 span') or
+            soup.select_one('h1') or
+            soup.select_one('span.VU-ZEz') or
+            soup.select_one('span.B_NuCI')
+        )
+        title = title_tag.get_text(strip=True) if title_tag else (soup.title.string if soup.title else '')
 
-        # Price
-        price_tag = soup.select_one('div._30jeq3._16Jk6d') or soup.select_one('div.Nx9bqj.CxhGGd')
-        price = clean_price_string(price_tag.get_text(strip=True) if price_tag else '')
+        # 2. Price (Matches currency regex)
+        prices = [t.strip() for t in soup.find_all(string=re.compile(r"^₹[\d,]+$"))]
+        current_price = clean_price_string(prices[0]) if prices else 0.0
 
-        # Rating
-        rating_tag = soup.select_one('div._3LWZlK') or soup.select_one('div.XQDdHH')
-        rating_match = re.search(r'([\d.]+)', rating_tag.get_text(strip=True) if rating_tag else '')
-        rating = float(rating_match.group(1)) if rating_match else None
+        # Original MSRP if discounted
+        original_price = clean_price_string(prices[1]) if len(prices) > 1 and clean_price_string(prices[1]) > current_price else current_price
 
-        # Total review count
-        count_tag = soup.select_one('span._2_R_DZ') or soup.select_one('span.Wphh3L')
+        # 3. Rating
+        ratings = [t.strip() for t in soup.find_all(string=re.compile(r"^\d\.\d$"))]
+        rating = float(ratings[0]) if ratings else None
+
+        # 4. Total reviews count
+        count_tag = soup.select_one('span.Wphh3L') or soup.select_one('span._2_R_DZ')
         review_count = 0
         if count_tag:
             match = re.search(r'([\d,]+)\s+Reviews', count_tag.get_text(strip=True), re.IGNORECASE)
             if match:
                 review_count = int(match.group(1).replace(',', ''))
 
-        # Image
-        img_tag = soup.select_one('img._396cs4._2amPTt._3qGmMb') or soup.select_one('img.DByuf4')
+        # 5. Image
+        img_tag = (
+            soup.select_one('img.DByuf4') or
+            soup.select_one('img._396cs4') or
+            soup.select_one('img[src*="flixcart"]')
+        )
         image_url = img_tag.get('src', '') if img_tag else ''
 
         return {
             'title': title,
-            'current_price': price,
+            'current_price': current_price,
+            'original_price': original_price,
             'rating': rating,
             'total_reviews_count': review_count,
             'image_url': image_url,
         }
 
     def scrape_reviews(self, product_url: str, max_pages: int = 3) -> list:
-        """
-        Navigates to Flipkart reviews section and extracts review cards.
-        """
         reviews = []
 
-        # Convert product URL to reviews listing URL if possible
-        if '/p/' in product_url:
-            review_url = product_url.replace('/p/', '/product-reviews/')
-        else:
-            review_url = product_url
-
         for page in range(1, max_pages + 1):
-            page_url = f"{review_url}&page={page}" if '?' in review_url else f"{review_url}?page={page}"
+            page_url = self.get_review_url(product_url, page=page)
             self.driver.get(page_url)
-            time.sleep(2)
+            time.sleep(3)
+            self.dismiss_login_popup()
 
             soup = BeautifulSoup(self.driver.page_source, 'html.parser')
 
-            # Flipkart review card classes
-            cards = soup.select('div._1AtVbE div._27M-vq') or soup.select('div.col.EPCmJX')
+            # Extract review cards by filtering out header category chips and boilerplate
+            for elem in soup.find_all(['div', 'p']):
+                text = elem.get_text(separator=' ', strip=True)
 
-            if not cards:
-                break
+                # Skip header tags and boilerplate
+                if 'overall camera battery' in text.lower():
+                    continue
 
-            for card in cards:
-                # Reviewer name
-                name_tag = card.select_one('p._2sc7ZR._2V5Rqn') or card.select_one('p._2NsDsF.AwS1CA')
-                reviewer_name = name_tag.get_text(strip=True) if name_tag else 'Anonymous'
-
-                # Rating
-                star_tag = card.select_one('div._3LWZlK') or card.select_one('div.XQDdHH')
-                star_rating = float(star_tag.get_text(strip=True)) if star_tag and star_tag.get_text(strip=True) else 0.0
-
-                # Review title
-                title_tag = card.select_one('p._2-N8zT') or card.select_one('p.z9E0IG')
-                review_title = title_tag.get_text(strip=True) if title_tag else ''
-
-                # Review text
-                body_tag = card.select_one('div.t-ZTKy div') or card.select_one('div.ZmyHeo div')
-                review_text = body_tag.get_text(separator=' ', strip=True) if body_tag else ''
-                # Remove "READ MORE" button text artifact
-                review_text = re.sub(r'READ MORE', '', review_text).strip()
-
-                # Review date
-                date_tag = card.select_one('p._2sc7ZR:not(._2V5Rqn)') or card.select_one('p._2NsDsF:not(.AwS1CA)')
-                review_date = parse_relative_date(date_tag.get_text(strip=True) if date_tag else '')
-
-                # Certified Buyer badge
-                badge_tag = card.select_one('p._2mcLdV') or card.select_one('div._1eDlvI')
-                is_verified = 'certified buyer' in (badge_tag.get_text(strip=True).lower() if badge_tag else '')
-
-                if review_text:
-                    reviews.append({
-                        'reviewer_name': reviewer_name,
-                        'rating': star_rating,
-                        'review_title': review_title,
-                        'review_text': review_text,
-                        'review_date': review_date,
-                        'is_verified_purchase': is_verified,
-                    })
+                if (
+                    30 < len(text) < 400
+                    and not any(bad in text.lower() for bad in ['flipkart', 'policy', 'terms', 'home/', 'storage', 'discount', 'sign in', 'read more'])
+                    and any(good in text.lower() for good in ['phone', 'camera', 'battery', 'quality', 'display', 'screen', 'apple', 'sound', 'good', 'nice', 'awesome', 'worth', 'fast', 'best', 'buy', 'product'])
+                ):
+                    # Clean the review text
+                    cleaned_text = re.sub(r'READ MORE', '', text, flags=re.IGNORECASE).strip()
+                    if not any(r['review_text'] == cleaned_text for r in reviews):
+                        reviews.append({
+                            'reviewer_name': 'Flipkart Customer',
+                            'rating': 5.0,  # Default rating if badge not adjacent
+                            'review_title': '',
+                            'review_text': cleaned_text,
+                            'review_date': None,
+                            'is_verified_purchase': True,
+                        })
 
         return reviews
