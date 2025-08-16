@@ -5,10 +5,20 @@ class Product(models.Model):
     PLATFORM_CHOICES = (
         ('amazon', 'Amazon'),
         ('flipkart', 'Flipkart'),
+        ('google_maps', 'Google Maps'),
+    )
+
+    CATEGORY_CHOICES = (
+        ('ecommerce', 'E-Commerce Product'),
+        ('restaurant', 'Restaurant / Cafe'),
+        ('healthcare', 'Hospital / Medical Clinic'),
+        ('automotive', 'Automobile Showroom / Service Center'),
+        ('general_business', 'General Local Business'),
     )
 
     url = models.URLField(max_length=1000, unique=True, db_index=True)
     platform = models.CharField(max_length=20, choices=PLATFORM_CHOICES)
+    business_category = models.CharField(max_length=30, choices=CATEGORY_CHOICES, default='ecommerce')
     title = models.CharField(max_length=500, blank=True, default='')
     current_price = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
     original_price = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
@@ -31,6 +41,9 @@ class Review(models.Model):
     review_text = models.TextField()
     review_date = models.DateField(null=True, blank=True)
     is_verified_purchase = models.BooleanField(default=False)
+    # Google Maps specific signals
+    is_local_guide = models.BooleanField(default=False)
+    reviewer_total_reviews = models.IntegerField(default=1)
     is_flagged_fake = models.BooleanField(default=False)
     sentiment_score = models.FloatField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -54,7 +67,7 @@ class PriceHistory(models.Model):
 
 class AnalysisReport(models.Model):
     product = models.OneToOneField(Product, on_delete=models.CASCADE, related_name='analysis_report')
-    trust_score = models.FloatField(default=0.0)  # Range 0 - 100
+    trust_score = models.FloatField(default=0.0)
     fake_review_percentage = models.FloatField(default=0.0)
     velocity_spike_detected = models.BooleanField(default=False)
     dark_patterns_detected = models.JSONField(default=list, blank=True)

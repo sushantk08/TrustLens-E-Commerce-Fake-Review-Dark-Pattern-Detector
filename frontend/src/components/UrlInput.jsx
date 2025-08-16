@@ -15,8 +15,9 @@ export default function UrlInput({ onSubmit, isLoading }) {
       return;
     }
 
-    if (!trimmed.includes('amazon') && !trimmed.includes('flipkart')) {
-      setError('Currently, only Amazon and Flipkart URLs are supported.');
+    const isSupported = trimmed.includes('amazon') || trimmed.includes('flipkart') || trimmed.includes('google.') || trimmed.includes('goo.gl');
+    if (!isSupported) {
+      setError('Supported platforms: Amazon, Flipkart, and Google Maps.');
       return;
     }
 
@@ -39,7 +40,7 @@ export default function UrlInput({ onSubmit, isLoading }) {
             type="url"
             value={url}
             onChange={(e) => setUrl(e.target.value)}
-            placeholder="https://www.amazon.in/dp/... or https://www.flipkart.com/..."
+            placeholder="Paste Amazon, Flipkart, or Google Maps link (e.g. restaurant, hospital, showroom)..."
             className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
             disabled={isLoading}
           />

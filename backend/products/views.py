@@ -32,9 +32,11 @@ class TriggerAnalysisView(APIView):
             platform = 'amazon'
         elif 'flipkart' in domain:
             platform = 'flipkart'
+        elif 'google.' in domain or 'goo.gl' in domain:
+            platform = 'google_maps'
         else:
             return Response(
-                {"error": "Unsupported platform. Only Amazon and Flipkart URLs are supported."},
+                {"error": "Unsupported platform. Supported: Amazon, Flipkart, and Google Maps."},
                 status=status.HTTP_400_BAD_REQUEST
             )
 
