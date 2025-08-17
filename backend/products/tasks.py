@@ -5,6 +5,7 @@ from django.utils import timezone
 from notifications.utils import send_task_progress
 from scrapers.amazon import AmazonScraper
 from scrapers.flipkart import FlipkartScraper
+from scrapers.google_maps import GoogleMapsScraper
 from analysis.scoring import compute_true_trust_score
 from .models import Product, Review, PriceHistory, AnalysisReport
 
@@ -12,13 +13,15 @@ from .models import Product, Review, PriceHistory, AnalysisReport
 @shared_task(bind=True)
 def run_product_analysis(self, product_url):
     task_id = self.request.id
-    platform = 'amazon' if 'amazon' in product_url.lower() else 'flipkart'
-
-    # 1. Initialize
-    send_task_progress(task_id, step='INIT', progress_percent=10, message='Initializing browser driver...')
-
-    scraper_class = AmazonScraper if platform == 'amazon' else FlipkartScraper
-
+    if 'amazon' in product_url.lower():
+        platform = 'amazon'
+        scraper_class = AmazonScraper
+    elif 'flipkart' in product_url.lower():
+        platform = 'flipkart'
+        scraper_class = FlipkartScraper
+    else:
+        platform = 'google_maps'
+        scraper_class = GoogleMapsScraper
     # 2. Scrape Metadata & Reviews
     try:
         with scraper_class() as scraper:
@@ -32,10 +35,14 @@ def run_product_analysis(self, product_url):
         return {'status': 'error', 'message': str(e)}
 
     # 3. Save or Update Product in Database
+    business_category = product_data.get('business_category', 'ecommerce')
+
+    # 3. Save or Update Product in Database
     product, _ = Product.objects.update_or_create(
         url=product_url,
         defaults={
             'platform': platform,
+            'business_category': business_category,
             'title': product_data.get('title', '')[:500],
             'current_price': product_data.get('current_price') or 0.0,
             'rating': product_data.get('rating'),
@@ -64,6 +71,8 @@ def run_product_analysis(self, product_url):
                 'review_title': r.get('review_title', '')[:500],
                 'review_date': r.get('review_date'),
                 'is_verified_purchase': r.get('is_verified_purchase', False),
+                'is_local_guide': r.get('is_local_guide', False),
+                'reviewer_total_reviews': r.get('reviewer_total_reviews', 1),
             }
         )
 
