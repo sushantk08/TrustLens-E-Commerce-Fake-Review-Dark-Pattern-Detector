@@ -86,7 +86,9 @@ def run_product_analysis(self, product_url):
         reviews=db_reviews,
         price_history=price_history,
         current_price=float(product.current_price or 0.0),
-        original_price=float(product.original_price or 0.0)
+        original_price=float(product.original_price or 0.0),
+        category=product.business_category  
+    
     )
 
     # 5. Persist Analysis Report

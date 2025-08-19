@@ -10,6 +10,18 @@ def compute_true_trust_score(reviews: list, price_history: list = None, current_
     Combines velocity analysis, semantic duplicate clustering, reviewer heuristics,
     dark patterns, and aspect sentiments into a consolidated True Trust Score (0-100).
     """
+
+    if not reviews or len(reviews) == 0:
+        return {
+            'trust_score': 0.0,
+            'fake_review_percentage': 0.0,
+            'velocity_spike_detected': False,
+            'dark_patterns_detected': [],
+            'aspects_sentiment': {},
+            'summary_reasons': ['Insufficient review data to compute a reliable Trust Score.'],
+            'components': {}
+        }
+
     # 1. Run component analyses
     velocity_res = analyze_review_velocity(reviews)
     credibility_res = analyze_reviewer_credibility(reviews)
