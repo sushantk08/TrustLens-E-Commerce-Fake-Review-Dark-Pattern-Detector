@@ -12,10 +12,17 @@ document.addEventListener('DOMContentLoaded', async () => {
   const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
   const tabUrl = tab?.url || '';
 
-  const isSupported = tabUrl.includes('amazon.') || tabUrl.includes('flipkart.');
+  const isSupported = (
+    tabUrl.includes('amazon.') ||
+    tabUrl.includes('flipkart.') ||
+    tabUrl.includes('google.com/maps') ||
+    tabUrl.includes('google.co.in/maps') ||
+    tabUrl.includes('maps.google.') ||
+    tabUrl.includes('maps.app.goo.gl')
+  );
 
   if (!isSupported) {
-    urlLabel.textContent = 'Please switch to an Amazon or Flipkart product listing tab.';
+    urlLabel.textContent = 'Please switch to an Amazon, Flipkart, or Google Maps listing tab.';
     analyzeBtn.disabled = true;
     return;
   }

@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "TrustLens - E-Commerce Review & Dark Pattern Detector",
   "version": "1.0.0",
-  "description": "Expose fake review rings and deceptive pricing directly while browsing Amazon and Flipkart.",
+  "description": "Expose fake review rings, bot clusters, and deceptive patterns on Amazon, Flipkart, and Google Maps.",
   "permissions": [
     "activeTab"
   ],
@@ -10,6 +10,10 @@
     "*://*.amazon.in/*",
     "*://*.amazon.com/*",
     "*://*.flipkart.com/*",
+    "*://*.google.com/maps/*",
+    "*://*.google.co.in/maps/*",
+    "*://maps.google.com/*",
+    "*://maps.app.goo.gl/*",
     "http://127.0.0.1:8000/*",
     "http://localhost:8000/*"
   ],

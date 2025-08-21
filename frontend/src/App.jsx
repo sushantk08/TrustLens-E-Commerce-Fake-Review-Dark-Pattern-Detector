@@ -32,7 +32,7 @@ export default function App() {
       const report = await fetchProductReport(productId);
       setProduct(report);
     } catch (err) {
-      console.error('Failed to load completed report:', err);
+      console.error('Failed to load report:', err);
     }
   };
 
@@ -63,7 +63,7 @@ export default function App() {
             Uncover the Real Trust Score
           </h1>
           <p className="text-gray-600 max-w-xl mx-auto">
-            Analyze review velocities, catch spun bot clusters, and expose artificial pre-sale price hikes.
+            Analyze reviews on Amazon, Flipkart, and Google Maps to expose bot rings, fake ratings, and hidden defects.
           </p>
         </div>
 
@@ -79,16 +79,26 @@ export default function App() {
 
         {product && report && (
           <div className="space-y-6">
-            {/* Product Header */}
             <div className="p-6 bg-white border border-gray-200 rounded-xl flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
               <div className="space-y-1">
-                <span className="text-xs font-semibold uppercase text-blue-600 tracking-wider">
-                  {product.platform}
-                </span>
-                <h2 className="text-xl font-bold text-gray-900">{product.title || 'Product Analysis'}</h2>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-semibold uppercase text-blue-600 tracking-wider">
+                    {product.platform.replace('_', ' ')}
+                  </span>
+                  {product.business_category && product.business_category !== 'ecommerce' && (
+                    <span className="text-xs px-2 py-0.5 bg-purple-50 text-purple-700 rounded-full font-medium capitalize">
+                      {product.business_category.replace('_', ' ')}
+                    </span>
+                  )}
+                </div>
+                <h2 className="text-xl font-bold text-gray-900">{product.title || 'Analysis Report'}</h2>
                 <div className="flex items-center gap-4 text-sm text-gray-500">
-                  <span>Price: ₹{product.current_price || 'N/A'}</span>
-                  <span>•</span>
+                  {product.platform !== 'google_maps' && product.current_price > 0 && (
+                    <>
+                      <span>Price: ₹{product.current_price}</span>
+                      <span>•</span>
+                    </>
+                  )}
                   <span>{product.total_reviews_count || product.reviews?.length || 0} reviews analyzed</span>
                 </div>
               </div>
@@ -104,20 +114,17 @@ export default function App() {
               </a>
             </div>
 
-            {/* Badges */}
             <TrustScoreBadge
               trustScore={report.trust_score}
               fakeReviewPct={report.fake_review_percentage}
               rawRating={product.rating}
             />
 
-            {/* Dark Patterns & Warnings */}
             <DarkPatternAlerts
               patterns={report.dark_patterns_detected}
               summaryReasons={report.summary_reasons}
             />
 
-            {/* Aspects Sentiment */}
             <AspectSentimentGrid aspects={report.aspects_sentiment} />
           </div>
         )}
