@@ -2,7 +2,7 @@ import re
 import time
 from bs4 import BeautifulSoup
 from selenium.webdriver.common.by import By
-from selenium.webdriver.common.keys import Keys
+from selenium.common.exceptions import StaleElementReferenceException, WebDriverException
 
 from .base import BaseScraper
 from .normalizer import parse_relative_date
@@ -10,28 +10,34 @@ from .normalizer import parse_relative_date
 
 class GoogleMapsScraper(BaseScraper):
     """
-    Scrapes business details and customer reviews from Google Maps listings.
+    Scrapes business metadata and paginated customer reviews from Google Maps listings.
     """
 
-    def dismiss_google_consent(self):
-        """Dismisses the 'Before you continue to Google' cookie modal if present."""
-        try:
-            consent_buttons = self.driver.find_elements(
-                By.XPATH, "//button[contains(., 'Accept all') or contains(., 'I agree') or contains(., 'Agree')]"
-            )
-            for btn in consent_buttons:
-                if btn.is_displayed():
-                    btn.click()
-                    time.sleep(1)
-                    break
-        except Exception:
-            pass
+    def handle_consent(self):
+        """Dismisses the Google cookie / consent dialog if present."""
+        xpaths = [
+            "//button[contains(., 'Accept all')]",
+            "//button[contains(., 'Accept')]",
+            "//button[contains(., 'I agree')]",
+            "//button[contains(., 'Agree')]",
+        ]
+        for xpath in xpaths:
+            try:
+                buttons = self.driver.find_elements(By.XPATH, xpath)
+                for btn in buttons:
+                    if btn.is_displayed():
+                        self.driver.execute_script("arguments[0].click();", btn)
+                        time.sleep(1.5)
+                        return
+            except Exception:
+                continue
 
     def detect_category(self, category_text: str) -> str:
-        """Categorizes the business based on Google's listing sub-heading."""
         c = category_text.lower()
         if any(w in c for w in ['restaurant', 'cafe', 'coffee', 'bakery', 'bar', 'food', 'bistro', 'dhaba']):
             return 'restaurant'
+        if any(w in c for w in ['hotel', 'resort', 'stay', 'lodge', 'convention', 'guest house']):
+            return 'restaurant'  # Group hospitality with dining/hospitality aspects
         if any(w in c for w in ['hospital', 'clinic', 'doctor', 'medical', 'dental', 'pharmacy', 'health']):
             return 'healthcare'
         if any(w in c for w in ['car', 'auto', 'motor', 'garage', 'workshop', 'showroom', 'bike', 'dealer']):
@@ -39,18 +45,18 @@ class GoogleMapsScraper(BaseScraper):
         return 'general_business'
 
     def scrape_product_details(self, url: str) -> dict:
-        """Extracts business name, rating, total reviews, and category from Google Maps."""
+        """Extracts listing title, overall rating, and category."""
         self.driver.get(url)
-        time.sleep(4)
-        self.dismiss_google_consent()
+        time.sleep(5)
+        self.handle_consent()
 
         soup = BeautifulSoup(self.driver.page_source, 'html.parser')
 
-        # 1. Business Name (Header)
+        # Title
         title_tag = soup.select_one('h1.DUwDvf') or soup.select_one('h1')
-        title = title_tag.get_text(strip=True) if title_tag else ''
+        title = title_tag.get_text(strip=True) if title_tag else (soup.title.string if soup.title else '')
 
-        # 2. Overall Rating
+        # Rating
         rating_tag = soup.select_one('div.F7nice span[aria-hidden="true"]')
         rating = None
         if rating_tag:
@@ -59,7 +65,7 @@ class GoogleMapsScraper(BaseScraper):
             except ValueError:
                 rating = None
 
-        # 3. Total Reviews Count
+        # Total reviews count
         count_tag = soup.select_one('div.F7nice span:last-child')
         total_reviews = 0
         if count_tag:
@@ -67,12 +73,12 @@ class GoogleMapsScraper(BaseScraper):
             if match:
                 total_reviews = int(match.group(1).replace(',', ''))
 
-        # 4. Business Category
+        # Category
         category_tag = soup.select_one('button[jsaction*="category"]') or soup.select_one('span.DkEaL')
         raw_category = category_tag.get_text(strip=True) if category_tag else 'General'
         category = self.detect_category(raw_category)
 
-        # 5. Image
+        # Image
         img_tag = soup.select_one('button[aria-label*="Photo"] img') or soup.select_one('img[src*="googleusercontent"]')
         image_url = img_tag.get('src', '') if img_tag else ''
 
@@ -86,93 +92,222 @@ class GoogleMapsScraper(BaseScraper):
             'image_url': image_url,
         }
 
-    def scrape_reviews(self, business_url: str, max_pages: int = 4) -> list:
-        """
-        Navigates to the Reviews tab and scrolls the review container to extract cards.
-        """
-        # Load the listing
-        self.driver.get(business_url)
-        time.sleep(3)
-        self.dismiss_google_consent()
+    def find_all_reviews_button(self):
+        """Locates the button that navigates to the full reviews feed."""
+        selectors = [
+            "//button[@aria-label='All reviews']",
+            "//button[contains(normalize-space(.), 'All reviews')]",
+            "//*[@aria-label='All reviews']",
+            "//button[contains(@aria-label, 'Reviews for') or contains(@aria-label, 'reviews for')]",
+            "//button[contains(., 'More reviews')]",
+            "//button[@role='tab' and contains(., 'Reviews')]",
+        ]
+        for xpath in selectors:
+            try:
+                elements = self.driver.find_elements(By.XPATH, xpath)
+                for el in elements:
+                    if el.is_displayed():
+                        return el
+            except Exception:
+                continue
+        return None
 
-        # Click the "Reviews" tab if available
+    def click_all_reviews(self, button):
         try:
-            reviews_tab = self.driver.find_element(
-                By.XPATH, "//button[@role='tab' and (contains(@aria-label, 'Reviews') or contains(., 'Reviews'))]"
+            self.driver.execute_script(
+                "arguments[0].scrollIntoView({block: 'center', inline: 'center'});", button
             )
-            reviews_tab.click()
-            time.sleep(2)
+            time.sleep(1)
         except Exception:
             pass
 
-        # Expand truncated reviews ("More" button)
-        def expand_reviews():
+        try:
+            button.click()
+            return True
+        except Exception:
             try:
-                more_buttons = self.driver.find_elements(By.XPATH, "//button[contains(., 'More') and @aria-expanded='false']")
-                for btn in more_buttons[:5]:
-                    self.driver.execute_script("arguments[0].click();", btn)
+                self.driver.execute_script("arguments[0].click();", button)
+                return True
+            except Exception:
+                return False
+
+    def wait_for_reviews(self, timeout=15):
+        end = time.time() + timeout
+        while time.time() < end:
+            try:
+                count = self.driver.execute_script("return document.querySelectorAll('div[data-review-id]').length;")
+                if count and count > 0:
+                    return True
             except Exception:
                 pass
+            time.sleep(1)
+        return False
 
-        # Scroll the dedicated Google Maps reviews pane
-        for _ in range(max_pages * 3):
-            expand_reviews()
+    def find_review_container(self):
+        return self.driver.execute_script("""
+            const review = document.querySelector('div[data-review-id]');
+            if (!review) return null;
+
+            let current = review;
+            const candidates = [];
+            for (let i = 0; current && i < 10; i++, current = current.parentElement) {
+                const style = getComputedStyle(current);
+                const isScrollable = current.scrollHeight > current.clientHeight + 100;
+                const hasOverflow = style.overflowY === 'auto' || style.overflowY === 'scroll';
+                if (isScrollable && hasOverflow) {
+                    candidates.push(current);
+                }
+            }
+            return candidates[0] || null;
+        """)
+
+    def expand_more_buttons(self):
+        try:
+            buttons = self.driver.find_elements(
+                By.XPATH, "//button[@aria-label='See more' or normalize-space(.)='More']"
+            )
+            for btn in buttons:
+                try:
+                    if btn.is_displayed():
+                        self.driver.execute_script("arguments[0].click();", btn)
+                except Exception:
+                    continue
+        except Exception:
+            pass
+
+    def get_raw_reviews(self):
+        return self.driver.execute_script("""
+            const cards = [...document.querySelectorAll('div[data-review-id]')];
+            const results = [];
+            const seen = new Set();
+
+            for (const card of cards) {
+                const reviewId = card.getAttribute('data-review-id');
+                if (!reviewId || seen.has(reviewId)) continue;
+                seen.add(reviewId);
+
+                const text = (card.innerText || '').trim();
+                results.push({ review_id: reviewId, raw_text: text });
+            }
+            return results;
+        """)
+
+    def parse_one_review(self, raw_review):
+        raw_text = raw_review.get("raw_text", "")
+        review_id = raw_review.get("review_id", "")
+        lines = [l.strip() for l in raw_text.splitlines() if l.strip()]
+
+        # 1. Author
+        author = lines[0] if lines else "Google User"
+
+        # 2. Rating (matches "X/5" e.g., 4/5, 5/5)
+        rating_match = re.search(r"\b([1-5])\s*/\s*5\b", raw_text)
+        rating = float(rating_match.group(1)) if rating_match else 5.0
+
+        # 3. Local Guide & stats
+        is_local_guide = "local guide" in raw_text.lower()
+        rev_count_match = re.search(r"(\d+)\s+reviews?", raw_text, re.IGNORECASE)
+        reviewer_total_reviews = int(rev_count_match.group(1)) if rev_count_match else 1
+
+        # 4. Date
+        date_str = ""
+        for line in lines:
+            if " on google" in line.lower() or " on tripadvisor" in line.lower():
+                date_str = re.sub(r"\s+on\s+.*$", "", line, flags=re.IGNORECASE).strip()
+                break
+        review_date = parse_relative_date(date_str) if date_str else None
+
+        # 5. Clean Review Text
+        rating_idx = -1
+        for i, l in enumerate(lines):
+            if re.fullmatch(r"[1-5]\s*/\s*5", l):
+                rating_idx = i
+                break
+
+        text_lines = lines[rating_idx + 1:] if rating_idx != -1 else lines[1:]
+        ignored = {
+            "more", "see more", "like", "share", "read more", "read more on tripadvisor",
+            "google", "tripadvisor"
+        }
+        clean_lines = [
+            l for l in text_lines
+            if l.lower() not in ignored and not l.lower().startswith("read more on")
+        ]
+        review_text = "\n".join(clean_lines).strip()
+
+        return {
+            'reviewer_name': author,
+            'rating': rating,
+            'review_title': '',
+            'review_text': review_text,
+            'review_date': review_date,
+            'is_verified_purchase': is_local_guide,
+            'is_local_guide': is_local_guide,
+            'reviewer_total_reviews': reviewer_total_reviews,
+        }
+
+    def scrape_reviews(self, business_url: str, max_pages: int = 6) -> list:
+        # Load business page
+        self.driver.get(business_url)
+        time.sleep(5)
+        self.handle_consent()
+
+        # Click "All reviews" / Reviews button
+        btn = self.find_all_reviews_button()
+        if btn:
+            self.click_all_reviews(btn)
+            time.sleep(2)
+
+        # Wait for review cards to populate
+        if not self.wait_for_reviews(timeout=15):
+            return []
+
+        container = self.find_review_container()
+        if not container:
+            return []
+
+        store = {}
+        last_scroll_pos = -1
+        unchanged = 0
+        max_cycles = max_pages * 4
+
+        for _ in range(max_cycles):
+            self.expand_more_buttons()
+            time.sleep(0.4)
+
             try:
-                # Find scrollable reviews container
-                scrollable_div = self.driver.find_element(By.XPATH, "//div[contains(@class, 'm6QErb') and @role='region']")
-                self.driver.execute_script("arguments[0].scrollTop = arguments[0].scrollHeight;", scrollable_div)
-            except Exception:
-                # Fallback: send page down to body
-                self.driver.find_element(By.TAG_NAME, "body").send_keys(Keys.PAGE_DOWN)
+                raw_batch = self.get_raw_reviews()
+                for item in raw_batch:
+                    rid = item.get("review_id")
+                    if rid and rid not in store:
+                        parsed = self.parse_one_review(item)
+                        if parsed['review_text'] and len(parsed['review_text']) > 8:
+                            store[rid] = parsed
+            except WebDriverException:
+                time.sleep(1)
+                continue
+
+            # Scroll the container
+            try:
+                after = self.driver.execute_script("""
+                    const el = arguments[0];
+                    el.scrollTop += Math.max(400, Math.floor(el.clientHeight * 0.85));
+                    return el.scrollTop;
+                """, container)
+            except StaleElementReferenceException:
+                container = self.find_review_container()
+                if not container:
+                    break
+                continue
+
+            if after == last_scroll_pos:
+                unchanged += 1
+            else:
+                unchanged = 0
+            last_scroll_pos = after
+
+            if unchanged >= 4:
+                break
             time.sleep(1.2)
 
-        soup = BeautifulSoup(self.driver.page_source, 'html.parser')
-
-        # Google Maps review card container class
-        review_cards = soup.select('div.jftiEf')
-        reviews = []
-
-        for card in review_cards:
-            # Reviewer Name
-            name_tag = card.select_one('div.d4r55') or card.select_one('.WNx5fc')
-            reviewer_name = name_tag.get_text(strip=True) if name_tag else 'Google User'
-
-            # Local Guide Badge & Reviewer Stats
-            sub_info = card.select_one('div.RfnDt')
-            sub_text = sub_info.get_text(strip=True) if sub_info else ''
-            is_local_guide = 'local guide' in sub_text.lower()
-
-            # Extract reviewer's total reviews count (e.g. '15 reviews · 4 photos')
-            rev_match = re.search(r'(\d+)\s+reviews?', sub_text, re.IGNORECASE)
-            reviewer_total_reviews = int(rev_match.group(1)) if rev_match else 1
-
-            # Star Rating
-            star_tag = card.select_one('span.kvMYJc')
-            star_rating = 5.0
-            if star_tag and star_tag.get('aria-label'):
-                match = re.search(r'(\d+)', star_tag['aria-label'])
-                if match:
-                    star_rating = float(match.group(1))
-
-            # Review Date
-            date_tag = card.select_one('span.rsqaWe')
-            date_str = date_tag.get_text(strip=True) if date_tag else ''
-            review_date = parse_relative_date(date_str)
-
-            # Review Text
-            body_tag = card.select_one('span.wiI7m') or card.select_one('div.MyEned')
-            review_text = body_tag.get_text(separator=' ', strip=True) if body_tag else ''
-
-            if review_text and len(review_text) > 8:
-                reviews.append({
-                    'reviewer_name': reviewer_name,
-                    'rating': star_rating,
-                    'review_title': '',
-                    'review_text': review_text,
-                    'review_date': review_date,
-                    'is_verified_purchase': is_local_guide,  # Map Local Guide to verified credibility
-                    'is_local_guide': is_local_guide,
-                    'reviewer_total_reviews': reviewer_total_reviews,
-                })
-
-        return reviews
+        return list(store.values())
