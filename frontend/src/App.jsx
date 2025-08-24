@@ -21,36 +21,57 @@ export default function App() {
       const data = await triggerAnalysis(url);
       setTaskId(data.task_id);
     } catch (err) {
-      alert(err.response?.data?.error || 'Failed to trigger analysis.');
+      alert(
+        err.response?.data?.error ||
+        'Failed to trigger analysis.'
+      );
       setLoading(false);
     }
   };
 
   const handleTaskComplete = async (productId) => {
     setLoading(false);
+
     try {
       const report = await fetchProductReport(productId);
       setProduct(report);
     } catch (err) {
-      console.error('Failed to load report:', err);
+      console.error(
+        'Failed to load report:',
+        err
+      );
     }
   };
 
   const handleTaskError = (msg) => {
     setLoading(false);
-    alert(msg || 'An error occurred during analysis.');
+
+    alert(
+      msg ||
+      'An error occurred during analysis.'
+    );
   };
 
   const report = product?.analysis_report;
+
+  const isGoogleMaps =
+    product?.platform === 'google_maps';
 
   return (
     <div className="min-h-screen bg-gray-50 text-gray-900">
       <header className="bg-white border-b border-gray-200 py-4 px-8">
         <div className="max-w-6xl mx-auto flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <ShieldCheck className="text-blue-600" size={28} />
-            <span className="text-xl font-bold tracking-tight">TrustLens</span>
+            <ShieldCheck
+              className="text-blue-600"
+              size={28}
+            />
+
+            <span className="text-xl font-bold tracking-tight">
+              TrustLens
+            </span>
           </div>
+
           <span className="text-xs font-medium text-gray-500 uppercase tracking-wider">
             Review & Dark Pattern Detector
           </span>
@@ -62,12 +83,19 @@ export default function App() {
           <h1 className="text-3xl font-extrabold text-gray-900">
             Uncover the Real Trust Score
           </h1>
+
           <p className="text-gray-600 max-w-xl mx-auto">
-            Analyze reviews on Amazon, Flipkart, and Google Maps to expose bot rings, fake ratings, and hidden defects.
+            Analyze reviews on Amazon, Flipkart,
+            and Google Maps to identify suspicious
+            reviews, rating patterns, and deceptive
+            shopping or business signals.
           </p>
         </div>
 
-        <UrlInput onSubmit={handleUrlSubmit} isLoading={loading} />
+        <UrlInput
+          onSubmit={handleUrlSubmit}
+          isLoading={loading}
+        />
 
         {taskId && !product && (
           <LiveProgressBar
@@ -83,23 +111,49 @@ export default function App() {
               <div className="space-y-1">
                 <div className="flex items-center gap-2">
                   <span className="text-xs font-semibold uppercase text-blue-600 tracking-wider">
-                    {product.platform.replace('_', ' ')}
+                    {product.platform.replace(
+                      '_',
+                      ' '
+                    )}
                   </span>
-                  {product.business_category && product.business_category !== 'ecommerce' && (
-                    <span className="text-xs px-2 py-0.5 bg-purple-50 text-purple-700 rounded-full font-medium capitalize">
-                      {product.business_category.replace('_', ' ')}
-                    </span>
-                  )}
+
+                  {product.business_category &&
+                    product.business_category !==
+                      'ecommerce' && (
+                      <span className="text-xs px-2 py-0.5 bg-purple-50 text-purple-700 rounded-full font-medium capitalize">
+                        {product.business_category.replace(
+                          '_',
+                          ' '
+                        )}
+                      </span>
+                    )}
                 </div>
-                <h2 className="text-xl font-bold text-gray-900">{product.title || 'Analysis Report'}</h2>
+
+                <h2 className="text-xl font-bold text-gray-900">
+                  {product.title ||
+                    'Analysis Report'}
+                </h2>
+
                 <div className="flex items-center gap-4 text-sm text-gray-500">
-                  {product.platform !== 'google_maps' && product.current_price > 0 && (
-                    <>
-                      <span>Price: ₹{product.current_price}</span>
-                      <span>•</span>
-                    </>
-                  )}
-                  <span>{product.reviews?.length || 0} reviews analyzed</span>
+                  {!isGoogleMaps &&
+                    product.current_price >
+                      0 && (
+                      <>
+                        <span>
+                          Price: ₹
+                          {
+                            product.current_price
+                          }
+                        </span>
+
+                        <span>•</span>
+                      </>
+                    )}
+
+                  <span>
+                    {product.reviews?.length || 0}{' '}
+                    reviews analyzed
+                  </span>
                 </div>
               </div>
 
@@ -109,23 +163,38 @@ export default function App() {
                 rel="noopener noreferrer"
                 className="px-4 py-2 border border-gray-300 rounded-lg text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-1.5 shrink-0"
               >
-                <span>View Listing</span>
+                <span>
+                  {isGoogleMaps
+                    ? 'View Location'
+                    : 'View Listing'}
+                </span>
+
                 <ExternalLink size={14} />
               </a>
             </div>
 
             <TrustScoreBadge
               trustScore={report.trust_score}
-              fakeReviewPct={report.fake_review_percentage}
+              fakeReviewPct={
+                report.fake_review_percentage
+              }
               rawRating={product.rating}
             />
 
             <DarkPatternAlerts
-              patterns={report.dark_patterns_detected}
-              summaryReasons={report.summary_reasons}
+              patterns={
+                report.dark_patterns_detected
+              }
+              summaryReasons={
+                report.summary_reasons
+              }
             />
 
-            <AspectSentimentGrid aspects={report.aspects_sentiment} />
+            <AspectSentimentGrid
+              aspects={
+                report.aspects_sentiment
+              }
+            />
           </div>
         )}
       </main>
