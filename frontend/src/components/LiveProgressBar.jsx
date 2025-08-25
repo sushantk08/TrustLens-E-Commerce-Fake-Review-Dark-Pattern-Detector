@@ -12,10 +12,15 @@ export default function LiveProgressBar({ taskId, onComplete, onError }) {
 
     let isCompleted = false;
 
+    // Resolve dynamic protocol: wss:// for https (production), ws:// for http (local)
+    const apiBase = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000';
+    const wsProtocol = apiBase.startsWith('https') ? 'wss://' : 'ws://';
+    const host = apiBase.replace(/^https?:\/\//, '');
+    const wsUrl = `${wsProtocol}${host}/ws/progress/${taskId}/`;
+
     // 1. Try WebSocket Connection
     let socket = null;
     try {
-      const wsUrl = `ws://127.0.0.1:8000/ws/progress/${taskId}/`;
       socket = new WebSocket(wsUrl);
 
       socket.onmessage = (event) => {
@@ -45,13 +50,13 @@ export default function LiveProgressBar({ taskId, onComplete, onError }) {
       };
 
       socket.onerror = () => {
-        console.log('WebSocket closed, polling active...');
+        console.log('WebSocket closed, using polling fallback...');
       };
     } catch (e) {
       console.log('Using polling fallback...');
     }
 
-    // 2. Fallback Polling in case Redis/WebSocket disconnects
+    // 2. Polling Fallback
     const pollInterval = setInterval(async () => {
       if (isCompleted) {
         clearInterval(pollInterval);
@@ -59,7 +64,7 @@ export default function LiveProgressBar({ taskId, onComplete, onError }) {
       }
 
       try {
-        const res = await fetch(`http://127.0.0.1:8000/api/products/lookup/?task_id=${taskId}`);
+        const res = await fetch(`${apiBase}/api/products/lookup/?task_id=${taskId}`);
         if (res.ok) {
           const prod = await res.json();
           if (prod && prod.analysis_report) {
