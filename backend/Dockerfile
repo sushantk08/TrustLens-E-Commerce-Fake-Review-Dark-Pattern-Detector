@@ -14,21 +14,21 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Python dependencies
-COPY requirements.txt /app/
+# Install CPU-only PyTorch wheel (saves >1GB of memory compared to default CUDA build)
 RUN pip install --no-cache-dir --upgrade pip
+RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu
+
+# Install remaining requirements
+COPY requirements.txt /app/
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Download spaCy NLP model and NLTK sentiment lexicon
+# Download NLP model and lexicon
 RUN python -m spacy download en_core_web_sm
 RUN python -c "import nltk; nltk.download('vader_lexicon')"
 
-# Copy backend codebase
 COPY . /app/
-
-# Make start script executable
 RUN chmod +x /app/start.sh
 
-EXPOSE 8000
+EXPOSE 10000
 
 CMD ["/app/start.sh"]
