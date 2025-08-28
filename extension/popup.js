@@ -1,4 +1,4 @@
-const BACKEND_BASE = 'http://127.0.0.1:8000';
+const BACKEND_BASE = 'https://trustlens-backend-tkda.onrender.com';
 
 document.addEventListener('DOMContentLoaded', async () => {
   const urlLabel = document.getElementById('url-label');
