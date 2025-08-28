@@ -1,809 +1,230 @@
-# TrustLens — E-Commerce Fake Review & Dark Pattern Detector
+# TrustLens: E-Commerce & Local Business Review Anomaly & Dark Pattern Detector
 
-TrustLens is an end-to-end e-commerce trust and transparency platform that analyzes product listings and customer-review signals to help users identify potentially **fake reviews, suspicious rating activity, and deceptive pricing patterns**.
-
-The project combines **Django, Django Channels/ASGI, Celery, Redis, PostgreSQL, React, Selenium, spaCy, and sentence-transformers** to create a full-stack detection system with background processing and browser-based analysis.
-
-> **Project Status:** Local development / portfolio project
+TrustLens is an AI-powered intelligence platform that analyzes customer reviews and pricing behavior across **Amazon**, **Flipkart**, and **Google Maps** (restaurants, hospitals, automotive services). It exposes inorganic review velocity surges, AI-generated bot rings, deceptive pre-sale price hikes, and extracts feature-level sentiment to calculate an authentic **True Trust Score**.
 
 ---
 
-## 🚀 What TrustLens Does
+## 🌐 Live Deployments
 
-TrustLens focuses on three major trust signals:
-
-### 1. Fake Review Detection
-Analyzes review content and behavior to identify suspicious patterns such as:
-
-- Highly similar or duplicated reviews
-- Repetitive wording across multiple reviews
-- Unusual review bursts
-- Suspicious reviewer behavior
-- Language patterns that may indicate coordinated reviews
-
-Natural-language processing is performed using tools such as **spaCy** and **sentence-transformers**.
-
-### 2. Rating Velocity Analysis
-
-TrustLens looks at how ratings change over time rather than relying only on the current average rating.
-
-For example:
-
-```text
-Normal pattern
-100 reviews → gradual rating growth
-
-Suspicious pattern
-100 reviews → 180 reviews in a very short period
-```
-
-Sudden review or rating spikes can become an additional signal for investigation.
-
-### 3. Dark Pattern / Deceptive Pricing Detection
-
-TrustLens analyzes product-price information to identify potentially misleading pricing techniques, such as:
-
-- Large displayed discounts
-- Artificially inflated "original" prices
-- Unusual price changes
-- Urgency-style pricing signals
-- Other suspicious pricing patterns
-
-The goal is not to automatically declare a seller fraudulent, but to surface **risk indicators that deserve closer attention**.
+* **Web Dashboard:** [https://trustlens-tau-eight.vercel.app](https://trustlens-tau-eight.vercel.app)  
+* **Backend API & WebSockets:** [https://trustlens-backend-tkda.onrender.com](https://trustlens-backend-tkda.onrender.com)
 
 ---
 
-# 🏗️ System Architecture
+## 🚀 Key Features
 
-TrustLens uses a full-stack architecture:
+1. **Asynchronous Scraping Engine (Selenium & Celery):**  
+     
+   * Headless Chrome driver configured with Chrome DevTools Protocol (CDP) anti-bot stealth mitigation.  
+   * Multi-platform support: **Amazon India/US**, **Flipkart**, and **Google Maps**.  
+   * Extracts customer reviews, star ratings, reviewer profiles, and historical pricing points.
 
-```text
-                         ┌─────────────────────┐
-                         │   React Frontend    │
-                         │  Web Dashboard/UI   │
-                         └──────────┬──────────┘
-                                    │
-                                    ▼
-                         ┌─────────────────────┐
-                         │   Django Backend    │
-                         │    REST / Logic     │
-                         └───────┬─────┬───────┘
-                                 │     │
-                    ┌────────────┘     └─────────────┐
-                    ▼                                ▼
-          ┌─────────────────┐              ┌─────────────────┐
-          │   PostgreSQL    │              │      Redis      │
-          │  Persistent DB   │              │ Broker / Cache  │
-          └─────────────────┘              └────────┬────────┘
-                                                     │
-                                                     ▼
-                                           ┌─────────────────┐
-                                           │ Celery Workers  │
-                                           │ Background Jobs │
-                                           └────────┬────────┘
-                                                    │
-                         ┌──────────────────────────┼────────────────────┐
-                         ▼                          ▼                    ▼
-                  ┌─────────────┐          ┌───────────────┐     ┌─────────────┐
-                  │  Selenium   │          │ NLP Analysis  │     │   Pricing   │
-                  │ Web Scraper │          │ spaCy / ST    │     │   Signals   │
-                  └─────────────┘          └───────────────┘     └─────────────┘
+   
 
-                         Chrome Extension
-                                │
-                                ▼
-                       Product Page Signals
-```
+2. **Real-Time Progress Streaming (Django Channels & WebSockets):**  
+     
+   * Uses Daphne (ASGI) and Redis Pub/Sub channel layers.  
+   * Streams live scraping and analysis progress directly to the React frontend in real time.
 
----
+   
 
-# 🛠️ Technology Stack
+3. **Review Velocity & Rating Anomaly Detection (Pandas & NumPy):**  
+     
+   * Detects abnormal time-series surges (sudden influxes of positive reviews over narrow date windows).  
+   * Identifies polarized bimodal distributions (clusters of 5-star promotional reviews masking 1-star product defects).
 
-| Layer | Technology |
-|---|---|
-| Backend | Django |
-| ASGI Server | Daphne |
-| Background Jobs | Celery |
-| Message Broker / Cache | Redis |
-| Database | PostgreSQL |
-| Frontend | React |
-| Web Scraping | Selenium |
-| NLP | spaCy |
-| Semantic Similarity | sentence-transformers |
-| Browser Integration | Chrome Extension |
-| Containerization | Docker / Docker Compose |
-| Language | Python / JavaScript |
+   
+
+4. **Semantic Duplicate Detection (Sentence-Transformers & PyTorch):**  
+     
+   * Uses dense vector embeddings (`all-MiniLM-L6-v2`) and cosine similarity.  
+   * Flags paraphrased and AI-spun bot reviews that traditional keyword matching misses.
+
+   
+
+5. **Multi-Domain Aspect-Based Sentiment Analysis (spaCy & NLTK VADER):**  
+     
+   * Category-aware feature extraction:  
+     * **E-Commerce:** Battery, Display, Camera, Performance, Build Quality, Sound, Delivery.  
+     * **Restaurants & Cafes:** Food Quality & Taste, Ambience & Vibe, Service & Staff, Hygiene, Value for Money.  
+     * **Healthcare & Hospitals:** Doctor Expertise, Nursing Care, Facilities & Cleanliness, Billing & Insurance, Wait Times.  
+     * **Automotive:** Service Quality, Pricing Transparency, Delivery Timelines, Staff Handling.
+
+   
+
+6. **Dark Pattern & Fraud Alert Engine:**  
+     
+   * **E-Commerce:** Identifies artificial pre-sale price hikes and persistent fake scarcity warnings (*"Only 1 left in stock"*).  
+   * **Google Maps:** Detects single-review account rings (bulk accounts with only 1 lifetime review) and flags the absence of verified Local Guides.
+
+   
+
+7. **Browser Extension (Manifest V3):**  
+     
+   * Seamless one-click inspection directly inside the browser while viewing an Amazon, Flipkart, or Google Maps listing.
 
 ---
 
-# 📁 Project Structure
+## 🛠️ Tech Stack
 
-A typical TrustLens repository is organized approximately as follows:
+* **Backend & API:** Python 3.12, Django 6, Django REST Framework, Daphne (ASGI)  
+* **Real-Time & Tasks:** Django Channels, Celery, Redis (Pub/Sub)  
+* **Data Science & ML:** Pandas, NumPy, Scikit-learn, Sentence-Transformers, PyTorch, spaCy, NLTK  
+* **Scraping:** Selenium, BeautifulSoup4, WebDriver Manager  
+* **Database:** PostgreSQL (Neon.tech / Managed Postgres)  
+* **Frontend:** React (Vite), Tailwind CSS, Lucide Icons, Recharts  
+* **Extension:** Chrome Extension Manifest V3  
+* **Cloud Infrastructure:** Vercel (Frontend), Render (Containerized Backend \+ Celery), Upstash (Serverless Redis)
 
-```text
+---
+
+## 📂 Project Architecture
+
 trustlens/
-│
-├── backend/
-│   ├── manage.py
-│   ├── trustlens_core/
-│   │   ├── settings.py
-│   │   ├── urls.py
-│   │   ├── asgi.py
-│   │   └── ...
-│   │
-│   ├── apps/
-│   │   ├── ...
-│   │   └── ...
-│   │
-│   └── venv/
-│
-├── frontend/
-│   ├── package.json
-│   ├── src/
-│   └── ...
-│
-├── extension/
-│   ├── manifest.json
-│   ├── ...
-│   └── ...
-│
-├── docker-compose.yml
+
+├── .gitignore
+
 ├── README.md
-└── ...
-```
 
-> The exact application/module names may differ depending on the current repository structure.
+├── docker-compose.yml
 
----
+│
 
-# ⚙️ Prerequisites
+├── backend/
 
-Before running TrustLens locally, install:
+│   ├── Dockerfile
 
-- Python 3.10+
-- Node.js and npm
-- PostgreSQL
-- Redis
-- Google Chrome
-- ChromeDriver compatible with your Chrome/Selenium setup
-- Git
+│   ├── manage.py
 
-For the Docker setup:
+│   ├── requirements.txt
 
-- Docker
-- Docker Compose
+│   ├── start.sh                       \# Production boot script for Daphne \+ Celery
 
----
+│   ├── trustlens\_core/                \# Django project root (settings, asgi, urls, celery)
 
-# 🔧 Local Development Setup
+│   ├── products/                      \# Models, DRF serializers, views, Celery tasks
 
-## 1. Clone the Repository
+│   ├── scrapers/                      \# Selenium drivers for Amazon, Flipkart, Google Maps
 
-```bash
-git clone <https://github.com/sushantk08/TrustLens-E-Commerce-Fake-Review-Dark-Pattern-Detector.git>
-cd trustlens
-```
+│   ├── analysis/                      \# Velocity, semantic, credibility, and aspect engines
 
----
+│   └── notifications/                 \# Channels consumers and WebSocket routing
 
-## 2. Start Supporting Services
+│
 
-TrustLens requires:
+├── frontend/                          \# React \+ Vite dashboard
 
-```text
-PostgreSQL → port 5432
-Redis      → port 6379
-```
+│   ├── src/
 
-Make sure both services are running before starting Django and Celery.
+│   │   ├── api/client.js              \# Dynamic API client
 
-Example PostgreSQL connection:
+│   │   ├── components/                \# Modular UI widgets (Progress, Badges, Aspects)
 
-```text
-Host: localhost
-Port: 5432
-```
+│   │   ├── App.jsx
 
-Example Redis connection:
+│   │   └── main.jsx
 
-```text
-redis://localhost:6379/0
-```
+│   ├── tailwind.config.js
+
+│   └── vite.config.js
+
+│
+
+└── extension/                         \# Chrome Extension (Manifest V3)
+
+    ├── manifest.json
+
+    ├── popup.html
+
+    └── popup.js
 
 ---
 
-# 🐍 3. Set Up the Django Backend
+## 💻 Local Development Setup
 
-Move into the backend directory:
+### 1\. Prerequisites
 
-```bash
+* Python 3.12+  
+* Node.js 18+  
+* PostgreSQL running on port `5432`  
+* Redis running on port `6379`
+
+### 2\. Backend Setup
+
 cd backend
-```
 
-Create a virtual environment:
+\# Create and activate virtual environment
 
-### Windows
+python \-m venv venv
 
-```bash
-python -m venv venv
-venv\Scripts\activate
-```
+source venv/bin/activate       \# On Windows: venv\\Scripts\\activate
 
-### Linux / macOS
+\# Install dependencies
 
-```bash
-python3 -m venv venv
-source venv/bin/activate
-```
+pip install \-r requirements.txt
 
-Install dependencies:
+python \-m spacy download en\_core\_web\_sm
 
-```bash
-pip install -r requirements.txt
-```
+python \-c "import nltk; nltk.download('vader\_lexicon')"
 
----
+\# Configure .env file
 
-## 4. Configure Environment Variables
+\# Create a .env file inside backend/ with your database credentials:
 
-Create a `.env` file inside the backend directory.
+\# DB\_NAME=trustlens\_db
 
-Example:
+\# DB\_USER=postgres
 
-```env
-DEBUG=True
+\# DB\_PASSWORD=your\_password
 
-DATABASE_NAME=trustlens
-DATABASE_USER=postgres
-DATABASE_PASSWORD=your_password
-DATABASE_HOST=localhost
-DATABASE_PORT=5432
+\# DB\_HOST=localhost
 
-REDIS_URL=redis://localhost:6379/0
-```
+\# DB\_PORT=5432
 
-> Never commit passwords, secret keys, API keys, or other credentials to GitHub.
+\# REDIS\_URL=redis://127.0.0.1:6379/0
 
----
+\# Apply migrations
 
-# 🗄️ 5. Run Database Migrations
-
-From the `backend` directory:
-
-```bash
 python manage.py migrate
-```
 
-Create an administrator account when needed:
+\# Start development ASGI server
 
-```bash
-python manage.py createsuperuser
-```
+python manage.py runserver 8000
 
----
+### 3\. Start Celery Worker (In a separate terminal)
 
-# 🌐 6. Start Django with Daphne
-
-Start the ASGI server:
-
-```bash
-daphne -p 8000 trustlens_core.asgi:application
-```
-
-The backend will be available at:
-
-```text
-http://localhost:8000
-```
-
----
-
-# 🔄 7. Start the Celery Worker
-
-Open a **new terminal**.
-
-Activate the same virtual environment and move to the backend directory:
-
-### Windows
-
-```bash
 cd backend
-venv\Scripts\activate
-```
 
-### Linux / macOS
+\# Activate virtual environment
 
-```bash
-cd backend
-source venv/bin/activate
-```
+celery \-A trustlens\_core worker \-l info \-P solo
 
-Start Celery:
+### 4\. Frontend Setup (In a separate terminal)
 
-```bash
-celery -A trustlens_core worker -l info
-```
-
-Celery handles long-running or resource-intensive work in the background instead of blocking the web application.
-
-Typical background tasks may include:
-
-```text
-Product scraping
-       ↓
-Review extraction
-       ↓
-Text processing
-       ↓
-Semantic similarity analysis
-       ↓
-Risk calculation
-       ↓
-Store results
-```
-
----
-
-# ⚛️ 8. Start the React Frontend
-
-Open another terminal:
-
-```bash
 cd frontend
+
 npm install
+
 npm run dev
-```
 
-The frontend will normally be available at:
+Open `http://localhost:5173` in your browser.
 
-```text
-http://localhost:5173
-```
+### 5\. Install Chrome Extension
 
-Open that URL in your browser.
-
----
-
-# 🌐 9. Install the Chrome Extension
-
-TrustLens can also integrate with a Chrome extension for browser-based product analysis.
-
-### Installation
-
-1. Open Google Chrome.
-2. Navigate to:
-
-```text
-chrome://extensions
-```
-
-3. Enable **Developer mode**.
-4. Click **Load unpacked**.
-5. Select:
-
-```text
-trustlens/extension
-```
-
-6. The TrustLens extension should now appear in your installed extensions.
+1. Open Google Chrome and navigate to `chrome://extensions`.  
+2. Toggle on **Developer mode** in the top-right corner.  
+3. Click **Load unpacked** and select the `trustlens/extension` directory.
 
 ---
 
-# 🐳 Docker Setup
+## 🐳 Docker Deployment (Alternative)
 
-Docker Compose provides an alternative way to run the supporting TrustLens services together.
+To run the entire ecosystem (PostgreSQL, Redis, Daphne ASGI, Celery) in Docker:
 
-Start the stack with:
-
-```bash
-docker-compose up --build
-```
-
-To run it in the background:
-
-```bash
-docker-compose up --build -d
-```
-
-To stop the services:
-
-```bash
-docker-compose down
-```
-
-To rebuild containers after dependency or configuration changes:
-
-```bash
-docker-compose up --build
-```
-
-A typical Docker deployment contains services such as:
-
-```text
-┌────────────────────────────────────┐
-│          Docker Compose            │
-│                                    │
-│  ┌─────────────┐ ┌─────────────┐  │
-│  │   Django    │ │    Celery   │  │
-│  │   /Daphne   │ │    Worker   │  │
-│  └──────┬──────┘ └──────┬──────┘  │
-│         │               │          │
-│  ┌──────▼──────┐ ┌──────▼──────┐  │
-│  │ PostgreSQL  │ │    Redis    │  │
-│  └─────────────┘ └─────────────┘  │
-└────────────────────────────────────┘
-```
+docker-compose up \--build
 
 ---
 
-# 🧠 Detection Pipeline
+## 📄 License
 
-The core TrustLens workflow can be represented as:
-
-```text
-Product URL
-    │
-    ▼
-Selenium Scraper
-    │
-    ├── Product information
-    ├── Price
-    ├── Ratings
-    └── Reviews
-          │
-          ▼
-     Data Cleaning
-          │
-          ▼
-    ┌──────────────────────────────┐
-    │       Analysis Engine       │
-    │                              │
-    │ Fake Review Signals         │
-    │ Rating Velocity              │
-    │ Review Similarity            │
-    │ Pricing / Dark Patterns      │
-    └──────────────┬───────────────┘
-                   │
-                   ▼
-             Risk Scoring
-                   │
-                   ▼
-          PostgreSQL Storage
-                   │
-                   ▼
-             React Dashboard
-```
-
----
-
-# 🤖 NLP & Machine Learning
-
-TrustLens uses multiple NLP techniques rather than relying on a single keyword-based rule.
-
-### spaCy
-
-spaCy can be used for:
-
-- Text preprocessing
-- Tokenization
-- Linguistic analysis
-- Named entities
-- Normalization
-- Feature extraction
-
-### sentence-transformers
-
-Sentence-transformers are used to generate semantic embeddings.
-
-For example:
-
-```text
-Review A:
-"Excellent product, highly recommended."
-
-Review B:
-"Great product, definitely recommend it."
-```
-
-Although the wording is different, their semantic meaning may be very similar.
-
-The system can compare their vector representations to identify potentially repetitive review patterns.
-
-Conceptually:
-
-```text
-Review Text
-    ↓
-Sentence Transformer
-    ↓
-Embedding Vector
-    ↓
-Similarity Calculation
-    ↓
-Suspicion Signal
-```
-
----
-
-# 🕷️ Web Scraping
-
-Selenium provides browser automation for collecting publicly visible product information.
-
-Typical workflow:
-
-```text
-Open product page
-      ↓
-Wait for dynamic content
-      ↓
-Extract product information
-      ↓
-Extract ratings/reviews
-      ↓
-Normalize data
-      ↓
-Send analysis job
-```
-
-Because e-commerce sites can change their HTML structure, selectors should be maintained carefully and scraping should respect each site's terms and applicable policies.
-
----
-
-# 📊 Example Risk Signals
-
-TrustLens can combine multiple indicators into an overall risk assessment.
-
-Example:
-
-```text
-Review Similarity        → High
-Review Burst             → High
-Rating Velocity          → Medium
-Price Discount Pattern   → High
-──────────────────────────────────
-Overall Trust Risk       → High
-```
-
-The final result should be interpreted as a **risk indicator**, not definitive proof that a review or seller is fraudulent.
-
----
-
-# 🔐 Security & Privacy Notes
-
-For a production deployment, the following should be implemented:
-
-- Keep secrets in environment variables
-- Never commit `.env` files
-- Validate user input
-- Add authentication and authorization where required
-- Apply API rate limiting
-- Restrict scraping frequency
-- Sanitize external data
-- Use HTTPS in production
-- Use secure PostgreSQL credentials
-- Configure Django `ALLOWED_HOSTS`
-- Disable `DEBUG` in production
-- Rotate sensitive credentials if accidentally exposed
-
-Example `.gitignore` entries:
-
-```gitignore
-.env
-venv/
-__pycache__/
-*.pyc
-node_modules/
-```
-
----
-
-# 🧪 Testing
-
-Recommended backend testing:
-
-```bash
-cd backend
-python manage.py test
-```
-
-Frontend tests depend on the configured React testing framework.
-
-For production-quality development, add tests for:
-
-```text
-Scraping logic
-NLP preprocessing
-Similarity calculations
-Risk scoring
-API endpoints
-Celery tasks
-Database models
-Frontend components
-Chrome extension behavior
-```
-
----
-
-# 🛠️ Troubleshooting
-
-## PostgreSQL connection error
-
-Verify PostgreSQL is running and confirm:
-
-```text
-Host     = localhost
-Port     = 5432
-Database = trustlens
-```
-
-Also verify the username and password in `.env`.
-
----
-
-## Redis connection error
-
-Confirm Redis is running:
-
-```text
-redis://localhost:6379/0
-```
-
----
-
-## Daphne command not found
-
-Make sure the virtual environment is activated and install Daphne:
-
-```bash
-pip install daphne
-```
-
----
-
-## Celery cannot connect to Redis
-
-Check:
-
-```text
-Redis running?
-REDIS_URL correct?
-Port 6379 available?
-```
-
----
-
-## Selenium / ChromeDriver problems
-
-Make sure the installed ChromeDriver version is compatible with your Chrome browser, or configure Selenium to use an appropriate driver-management approach.
-
----
-
-## React dependency problems
-
-Try:
-
-```bash
-cd frontend
-npm install
-npm run dev
-```
-
-If dependencies are corrupted:
-
-```bash
-rm -rf node_modules
-npm install
-```
-
-On Windows PowerShell, you can remove the directory with:
-
-```powershell
-Remove-Item -Recurse -Force node_modules
-npm install
-```
-
----
-
-# 📌 Development Commands
-
-### Backend
-
-```bash
-cd backend
-venv\Scripts\activate
-python manage.py migrate
-daphne -p 8000 trustlens_core.asgi:application
-```
-
-### Celery
-
-```bash
-cd backend
-venv\Scripts\activate
-celery -A trustlens_core worker -l info
-```
-
-### Frontend
-
-```bash
-cd frontend
-npm install
-npm run dev
-```
-
-### Docker
-
-```bash
-docker-compose up --build
-```
-
----
-
-# 🎯 Why This Project Is Useful
-
-TrustLens demonstrates several skills that are useful in real-world Python/backend engineering:
-
-- Full-stack application development
-- Django backend development
-- ASGI deployment with Daphne
-- Asynchronous background processing with Celery
-- Redis message brokering
-- PostgreSQL database integration
-- Web automation with Selenium
-- Natural-language processing
-- Semantic text similarity
-- React frontend development
-- Chrome extension integration
-- Docker-based deployment
-- Data analysis and risk scoring
-
-The project is designed to show how multiple technologies can work together to solve a practical problem instead of demonstrating each technology in isolation.
-
----
-
-# 📈 Future Improvements
-
-Potential future improvements include:
-
-- Historical price tracking
-- Review-author behavior analysis
-- Graph-based review-ring detection
-- More advanced anomaly detection
-- Product comparison across marketplaces
-- Explainable AI scoring
-- Review timeline visualization
-- Browser-side real-time warnings
-- Authentication and user accounts
-- Cloud deployment on AWS
-- Monitoring and observability
-- Automated model evaluation
-- Scheduled data collection
-- Better marketplace-specific scraping adapters
-
----
-
-# ⚠️ Disclaimer
-
-TrustLens is an analytical and educational project.
-
-A high-risk score does **not** automatically mean that a seller, product, or review is fraudulent. Detection results are based on statistical, behavioral, linguistic, and pricing signals and should be treated as indicators for further investigation.
-
-Scraping and automated access to websites must comply with the applicable website terms, robots policies, laws, and service restrictions.
-
----
-
-# 📄 License
-
-Add your preferred open-source license here, for example:
-
-```text
-MIT License
-```
-
----
-
-# 👨‍💻 Author
-
-**Sushant Kulkarni**
-
-Built as a portfolio project demonstrating Python backend development, automation, NLP, machine learning, asynchronous processing, and full-stack engineering.
+This project is open source and available under the [MIT License](http://LICENSE).  
