@@ -99,7 +99,7 @@ export default function App() {
                       <span>•</span>
                     </>
                   )}
-                  <span>{product.total_reviews_count || product.reviews?.length || 0} reviews analyzed</span>
+                  <span>{product.reviews?.length || 0} reviews analyzed</span>
                 </div>
               </div>
 
