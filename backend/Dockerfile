@@ -14,11 +14,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Install lightweight ASGI server and Python dependencies
+# Install lightweight Uvicorn and Scikit-learn (NO PyTorch)
 RUN pip install --no-cache-dir --upgrade pip
 RUN pip install --no-cache-dir "uvicorn[standard]" scikit-learn
 
 COPY requirements.txt /app/
+# Remove torch from requirements.txt if present
+RUN sed -i '/torch/d' /app/requirements.txt
+RUN sed -i '/sentence-transformers/d' /app/requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Download lightweight NLP model and lexicon
